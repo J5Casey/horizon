@@ -441,6 +441,9 @@ impl BlockEntity {
         if name == "minecraft:end_gateway" {
             return Some(Self::EndGateway(EndGateway::default()));
         }
+        if name == "minecraft:bell" {
+            return Some(Self::Bell);
+        }
         if name == "minecraft:daylight_detector" {
             return Some(Self::DaylightDetector);
         }
@@ -536,6 +539,7 @@ impl BlockEntity {
             Self::Crafter(_) => name == "minecraft:crafter",
             Self::EndGateway(_) => name == "minecraft:end_gateway",
             Self::DaylightDetector => name == "minecraft:daylight_detector",
+            Self::Bell => name == "minecraft:bell",
             Self::StructureBlock(_) => name == "minecraft:structure_block",
             Self::TestBlock(_) => name == "minecraft:test_block",
             Self::TestInstanceBlock(_) => name == "minecraft:test_instance_block",
@@ -574,6 +578,7 @@ impl BlockEntity {
             Self::Skull(_) => "minecraft:skull",
             Self::EndGateway(_) => "minecraft:end_gateway",
             Self::DaylightDetector => "minecraft:daylight_detector",
+            Self::Bell => "minecraft:bell",
             Self::Brushable(_) => "minecraft:brushable_block",
             Self::Campfire(_) => "minecraft:campfire",
             Self::ChiseledBookshelf(_) => "minecraft:chiseled_bookshelf",
@@ -608,6 +613,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => Vec::new(),
             Self::Mod(m) => m.items.iter().flatten().cloned().collect(),
             Self::Lectern(l) => l.book.iter().cloned().collect(),
@@ -638,6 +644,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => &[],
             Self::Jukebox(j) => &j.items,
             Self::Crafter(c) => &c.items,
@@ -673,6 +680,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => &mut [],
             Self::Jukebox(j) => &mut j.items,
             Self::Crafter(c) => &mut c.items,
