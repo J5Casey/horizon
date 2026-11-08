@@ -182,6 +182,9 @@ pub struct ItemInfo {
     pub equip_slot: Option<String>,
     /// `equippable.asset_id`: the equipment asset drawn when worn.
     pub equip_asset: Option<String>,
+    /// `equippable.camera_overlay`: the texture drawn over the screen when
+    /// worn in first person (`misc/pumpkinblur`).
+    pub equip_camera_overlay: Option<String>,
     /// All `attribute_modifiers`: (attribute, id, amount, operation, slot group).
     pub modifiers: Vec<(String, String, f64, String, String)>,
     /// `blocks_attacks` (shields).
@@ -970,6 +973,9 @@ impl Items {
                             .unwrap_or(1) as u32
                     }),
                     equip_asset: c["minecraft:equippable"]["asset_id"]
+                        .as_str()
+                        .map(str::to_owned),
+                    equip_camera_overlay: c["minecraft:equippable"]["camera_overlay"]
                         .as_str()
                         .map(str::to_owned),
                     equip_slot: c["minecraft:equippable"]["slot"]
@@ -1918,7 +1924,15 @@ impl LootContext<'_> {
                         let max = e["levels"]["max"].as_u64().map_or(u32::MAX, |m| m as u32);
                         level >= min.max(1) && level <= max
                     });
-                items_ok && enchants_ok
+                let custom_ok = c["predicate"]["predicates"]
+                    .get("minecraft:custom_data")
+                    .is_none_or(|pattern| {
+                        horizon_world::loot::custom_data_matches(
+                            pattern,
+                            self.held.and_then(ItemStack::custom_data),
+                        )
+                    });
+                items_ok && enchants_ok && custom_ok
             }
             "minecraft:killed_by_player" => self.killed_by_player,
             "minecraft:random_chance_with_enchanted_bonus" => {
