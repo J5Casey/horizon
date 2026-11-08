@@ -1803,15 +1803,32 @@ impl Game<'_> {
         let vehicle = self
             .parent_vehicle_in(None, &dim, riding, &others, false)
             .map(|(tag, _)| tag);
-        let host = self.lan.as_ref()?;
+        let mut host = self.lan.take()?;
         let mut stored = None;
-        if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
+        if let Some(i) = host
+            .hub
+            .guests
+            .iter()
+            .position(|g| g.uuid == uuid && g.placed)
+        {
+            // While the owner plays, its attachments live in `guest_attachments`
+            // (taken out of the guest when it joined): the file the owner loads
+            // from carries those, as `save_guest` gives them on leaving. The map
+            // stays their one owner.
+            let live = self.guest_attachments.get(&uuid).cloned();
+            let g = &mut host.hub.guests[i];
+            let held = live.map(|a| std::mem::replace(&mut g.attachments, a));
             playerdata::store(g, &mut self.level, vehicle);
-            self.save_guest_records(host, g);
+            if let Some(held) = held {
+                g.attachments = held;
+            }
+            let g = &host.hub.guests[i];
+            self.save_guest_records(&host, g);
             stored = Some(g.name.clone());
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
             self.level.position = saved.position;
         }
+        self.lan = Some(host);
         stored.map(|name| (uuid, name))
     }
 
