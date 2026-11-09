@@ -545,6 +545,20 @@ pub enum NativePanelStyle {
     /// A recipe viewer's: square page buttons on a bar over the items and
     /// the viewer's search box, as Horizon's Recipes panel draws them.
     Viewer,
+    /// JEI's look on Minecraft 1.12: the items flush with the screen's right
+    /// edge under a row of square page buttons that always shows (they wrap
+    /// around), the viewer's search box at the foot of the screen with a
+    /// settings button beside it that opens the mod's page in Options > Mods,
+    /// and a whole slot lit under the pointer.
+    Classic {
+        /// The search box under the window when there is room below it (JEI's
+        /// "center search bar"), else under the items.
+        centred_search: bool,
+        /// Lay the panel out beside a window at least this wide, centred on
+        /// the screen (a recipe screen the mod draws over the container);
+        /// 0 for the container's own.
+        window_width: u16,
+    },
 }
 
 /// What the player did on a native mod's panel (`native_panel_event`).
