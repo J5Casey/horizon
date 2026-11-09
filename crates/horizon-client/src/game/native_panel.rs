@@ -25,6 +25,11 @@ const COLUMNS: (usize, usize) = (12, 2);
 /// The gap between the window and the panel, and the screen's edges.
 const MARGIN: f32 = 8.0;
 const RECIPES_SETTINGS_WIDTH: f32 = 20.0;
+/// The classic look's gap to the window and the screen's edges, and its
+/// square buttons and search box (`NativePanelStyle::Classic`, JEI 1.12's
+/// `IngredientListOverlay`).
+const CLASSIC_PAD: f32 = 2.0;
+const CLASSIC_BUTTON: f32 = 20.0;
 
 /// Items a panel may hold.
 const ITEMS: usize = 8192;
@@ -73,8 +78,8 @@ pub(super) struct Panel {
     /// The recipes shown instead of the items.
     pub(super) recipes: Option<super::native_panel_recipes::Pages>,
     pub(super) transfer_warning: Option<(&'static str, &'static str)>,
-    /// The mods that asked for the viewer's page buttons and search box.
-    viewer_styled: std::collections::BTreeSet<String>,
+    /// The mods that asked for another look than the recipe book's.
+    styles: std::collections::BTreeMap<String, NativePanelStyle>,
     pub(super) fuel_popup: Option<super::native_panel_recipes::FuelPopup>,
 }
 
@@ -82,15 +87,32 @@ impl Panel {
     /// `native_panel_style`.
     pub(super) fn set_style(&mut self, mod_id: &str, style: NativePanelStyle) {
         match style {
-            NativePanelStyle::Viewer => self.viewer_styled.insert(mod_id.to_owned()),
-            _ => self.viewer_styled.remove(mod_id),
+            NativePanelStyle::RecipeBook => self.styles.remove(mod_id),
+            _ => self.styles.insert(mod_id.to_owned(), style),
         };
     }
-    /// Whether `owner`'s panel draws the viewer's page buttons and search box:
-    /// Horizon's own Recipes panel, or a mod that asked for them.
+    /// How `owner`'s panel looks: Horizon's own Recipes panel is the viewer's.
+    fn style(&self, owner: &Owner) -> NativePanelStyle {
+        match owner.native_id() {
+            "recipes" => NativePanelStyle::Viewer,
+            id => self.styles.get(id).copied().unwrap_or_default(),
+        }
+    }
+    /// Whether `owner`'s panel draws square page buttons and the viewer's
+    /// search box: the viewer's look or the classic one.
     fn viewer_style(&self, owner: &Owner) -> bool {
-        let id = owner.native_id();
-        id == "recipes" || self.viewer_styled.contains(id)
+        !matches!(self.style(owner), NativePanelStyle::RecipeBook)
+    }
+    /// The classic look's settings (`NativePanelStyle::Classic`), if `owner`
+    /// asked for it.
+    fn classic(&self, owner: &Owner) -> Option<(bool, u16)> {
+        match self.style(owner) {
+            NativePanelStyle::Classic {
+                centred_search,
+                window_width,
+            } => Some((centred_search, window_width)),
+            _ => None,
+        }
     }
     /// What the panel shows: a native mod's, one `on`.
     pub(super) fn shown(&self, on: impl Fn(&str) -> bool) -> Option<&Shown> {
@@ -161,13 +183,19 @@ pub(super) struct Layout {
     pub(super) arrows_y: f32,
     pub(super) search: [f32; 4],
     settings: Option<[f32; 4]>,
+    /// The classic look: its page buttons always show and wrap around.
+    classic: bool,
+    /// The page row's left edge and width: the grid's, or JEI's least 80
+    /// pixels flush right when the grid is narrower (the classic look).
+    nav: (f32, f32),
 }
 impl Layout {
     fn browser_arrow_rects(&self, square: bool) -> [[f32; 4]; 2] {
         if square {
+            let (x, w) = self.nav;
             return [
-                [self.grid.0, self.arrows_y, 20.0, 20.0],
-                [self.grid.0 + self.width() - 20.0, self.arrows_y, 20.0, 20.0],
+                [x, self.arrows_y, 20.0, 20.0],
+                [x + w - 20.0, self.arrows_y, 20.0, 20.0],
             ];
         }
         self.arrows().map(|(x, y)| [x, y, 12.0, 17.0])
@@ -191,6 +219,88 @@ impl Layout {
             (self.grid.0, self.arrows_y),
             (self.grid.0 + self.width() - 12.0, self.arrows_y),
         ]
+    }
+}
+
+/// The classic look's parts (`NativePanelStyle::Classic`, JEI 1.12's
+/// `IngredientListOverlay`): the items from 2 pixels right of `window` (or of
+/// a window `window_width` wide centred on the screen, when that is wider) to
+/// 2 from the screen's edge, flush right and centred in their height, under a
+/// 20 pixel row of page buttons; the search box 20 tall at the foot of the
+/// screen, under the window when `centred` and there is room below it, else
+/// under the items, with the 20 pixel settings button on its right. None
+/// without room for two columns or a row.
+fn classic_layout(
+    screen: [f32; 2],
+    window: [f32; 4],
+    window_width: f32,
+    centred: bool,
+) -> Option<Layout> {
+    let [width, height] = screen;
+    let window = if window_width > window[2] {
+        let x = ((width - window_width) / 2.0).floor();
+        [x, window[1], window_width, window[3]]
+    } else {
+        window
+    };
+    let left = window[0] + window[2] + CLASSIC_PAD;
+    let right = width - CLASSIC_PAD;
+    let columns = (((right - left) / SLOT).floor().max(0.0) as usize).min(COLUMNS.0);
+    if columns < COLUMNS.1 {
+        return None;
+    }
+    let grid_width = columns as f32 * SLOT;
+    // JEI keeps the list 80 pixels wide at the least, the grid centred in it.
+    let list_width = grid_width.max(4.0 * CLASSIC_BUTTON);
+    let list_x = right - list_width;
+    let x = list_x + ((list_width - grid_width) / 2.0).floor();
+    let foot = height - CLASSIC_PAD - CLASSIC_BUTTON;
+    let centred = centred && window[1] + window[3] + CLASSIC_BUTTON < height;
+    let (search_x, search_width) = if centred {
+        (window[0], window[2])
+    } else {
+        (list_x, list_width)
+    };
+    let search = [
+        search_x,
+        foot,
+        search_width - CLASSIC_BUTTON + 1.0,
+        CLASSIC_BUTTON,
+    ];
+    let settings = [
+        search[0] + search[2] - 1.0,
+        foot,
+        CLASSIC_BUTTON,
+        CLASSIC_BUTTON,
+    ];
+    let top = CLASSIC_PAD + CLASSIC_BUTTON;
+    let bottom = if centred {
+        height - CLASSIC_PAD
+    } else {
+        foot - CLASSIC_PAD
+    };
+    let rows = ((bottom - top) / SLOT).floor().max(0.0) as usize;
+    let y = top + ((bottom - top - rows as f32 * SLOT) / 2.0).floor();
+    (rows > 0).then_some(Layout {
+        area: [left, 0.0, right - left, height],
+        grid: (x, y),
+        columns,
+        rows,
+        arrows_y: CLASSIC_PAD,
+        search,
+        settings: Some(settings),
+        classic: true,
+        nav: (list_x, list_width),
+    })
+}
+
+/// JEI's tint of a button's icon (`GuiIconButton`): light grey, darker on a
+/// button that is off, pale yellow under the pointer.
+fn icon_tint(on: bool, hovered: bool) -> u32 {
+    match (on, hovered) {
+        (false, _) => rgba(0xA0, 0xA0, 0xA0, 0xFF),
+        (true, true) => rgba(0xFF, 0xFF, 0xA0, 0xFF),
+        (true, false) => rgba(0xE0, 0xE0, 0xE0, 0xFF),
     }
 }
 
@@ -269,11 +379,23 @@ impl Game<'_> {
             .of
             .as_ref()
             .is_some_and(|(owner, _)| owner.native_id() == "recipes");
-        let left = if self.screen == Screen::Creative {
-            Self::creative_origin(batch).0 + 198.0 + MARGIN
+        let window_right = if self.screen == Screen::Creative {
+            Self::creative_origin(batch).0 + 198.0
         } else {
-            (image.left + image.width) as f32 + MARGIN
+            (image.left + image.width) as f32
         };
+        let classic = self
+            .panel
+            .of
+            .as_ref()
+            .and_then(|(owner, _)| self.panel.classic(owner));
+        if let Some((centred, window_width)) = classic.filter(|_| !recipes) {
+            let (left, top) = (image.left as f32, image.top as f32);
+            let window = [left, top, window_right - left, image.height as f32];
+            let screen = [batch.width, batch.height];
+            return classic_layout(screen, window, f32::from(window_width), centred);
+        }
+        let left = window_right + MARGIN;
         let (width, height) = self.renderer.as_ref().filter(|_| recipes).map_or(
             (batch.width, batch.height),
             |renderer| {
@@ -327,6 +449,8 @@ impl Game<'_> {
             arrows_y,
             search,
             settings,
+            classic: false,
+            nav: (x, grid_width),
         })
     }
     fn browser_pages(&self, layout: &Layout) -> usize {
@@ -379,6 +503,7 @@ impl Game<'_> {
         labels: &[String; 2],
         enabled: [bool; 2],
         square: bool,
+        classic: bool,
     ) {
         let atlas = &self.gui.atlas;
         for (i, (rect @ [x, y, w, h], on)) in rects.into_iter().zip(enabled).enumerate() {
@@ -394,7 +519,14 @@ impl Game<'_> {
                     "horizon/jei/icons/arrow_previous_v2",
                     "horizon/jei/icons/arrow_next_v2",
                 ][i];
-                batch.sprite(atlas, arrow, x + 5.0, y + 6.0);
+                // The classic look tints its icons as JEI: grey, darker when
+                // off, yellow under the pointer.
+                let tint = if classic {
+                    icon_tint(on, hovered)
+                } else {
+                    u32::MAX
+                };
+                batch.sprite_scaled(atlas, arrow, x + 5.0, y + 6.0, 9.0, 7.0, tint);
             } else if on {
                 let name = ["page_backward", "page_forward"][i];
                 let suffix = if hovered { "_highlighted" } else { "" };
@@ -413,6 +545,7 @@ impl Game<'_> {
 
     /// The items' page arrows and grid.
     fn draw_browser_items(&mut self, batch: &mut HudBatch, layout: &Layout) {
+        let classic = layout.classic;
         let pages = self.browser_pages(layout);
         self.panel.page = self.panel.page.min(pages - 1);
         let page = self.panel.page;
@@ -422,14 +555,19 @@ impl Game<'_> {
             .of
             .as_ref()
             .is_some_and(|(owner, _)| self.panel.viewer_style(owner));
-        if pages > 1 || (square && !self.panel.stacks.is_empty()) {
+        if pages > 1 || (square && !self.panel.stacks.is_empty()) || classic {
             let labels = [
                 self.translate("gui.recipebook.previous_page", "Previous Page"),
                 self.translate("gui.recipebook.next_page", "Next Page"),
             ];
-            let shown = [page > 0, page + 1 < pages];
+            // The classic buttons wrap around, so both work with two pages.
+            let shown = if classic {
+                [pages > 1; 2]
+            } else {
+                [page > 0, page + 1 < pages]
+            };
             let atlas = &self.gui.atlas;
-            if square {
+            if square && !classic {
                 batch.fill(
                     atlas,
                     layout.grid.0,
@@ -445,10 +583,11 @@ impl Game<'_> {
                 &labels,
                 shown,
                 square,
+                classic,
             );
             let text = format!("{}/{pages}", page + 1);
             let w = HudBatch::text_width(atlas, &text);
-            let x = (layout.grid.0 + (layout.width() - w) / 2.0).floor();
+            let x = (layout.nav.0 + (layout.nav.1 - w) / 2.0).floor();
             batch.text(
                 atlas,
                 &text,
@@ -470,12 +609,14 @@ impl Game<'_> {
             self.draw_item(batch, &stack, x + 1.0, y + 1.0);
             let rect = [x + 1.0, y + 1.0, 16.0, 16.0];
             if inside(cursor, [x, y, SLOT, SLOT]) {
+                // The classic look lights the whole slot, as JEI 1.12.
+                let lit = if classic { [x, y, SLOT, SLOT] } else { rect };
                 batch.fill(
                     &self.gui.atlas,
-                    x + 1.0,
-                    y + 1.0,
-                    16.0,
-                    16.0,
+                    lit[0],
+                    lit[1],
+                    lit[2],
+                    lit[3],
                     rgba(255, 255, 255, 128),
                 );
             }
@@ -510,30 +651,51 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|(owner, _)| self.panel.viewer_style(owner))
             .then_some("horizon/jei/search_background_v2");
+        let nothing_found = self.panel.stacks.is_empty();
         let search = self.browser_search(&layout);
         // The hint shows in an empty box without focus, as the recipe book's.
         search.suggestion = (search.value.is_empty() && !search.focused).then_some(hint);
+        if layout.classic {
+            // JEI's search text: white, red when nothing matches.
+            search.text_color = if nothing_found && !search.value.is_empty() {
+                rgba(255, 0, 0, 255)
+            } else {
+                rgba(255, 255, 255, 255)
+            };
+        }
         let mut search = search.clone();
         search.draw_with_skin(batch, &self.gui.atlas, None, skin);
         self.panel.search = Some(search);
         if let Some(rect @ [x, y, width, height]) = layout.settings {
             let hovered = inside(cursor, rect);
             let atlas = &self.gui.atlas;
-            let sprite = if hovered {
-                "gui/sprites/widget/button_highlighted"
+            if layout.classic {
+                // JEI's config button: its wrench on its own button.
+                let sprite = if hovered {
+                    "horizon/jei/button_highlight_v2"
+                } else {
+                    "horizon/jei/button_enabled_v2"
+                };
+                horizon_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
+                let (icon, tint) = ("horizon/jei/icons/config_button", icon_tint(true, hovered));
+                batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, tint);
             } else {
-                "gui/sprites/widget/button"
-            };
-            horizon_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
-            batch.sprite_scaled(
-                atlas,
-                "horizon/recipes/settings",
-                x + 4.0,
-                y + 2.0,
-                12.0,
-                12.0,
-                u32::MAX,
-            );
+                let sprite = if hovered {
+                    "gui/sprites/widget/button_highlighted"
+                } else {
+                    "gui/sprites/widget/button"
+                };
+                horizon_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
+                batch.sprite_scaled(
+                    atlas,
+                    "horizon/recipes/settings",
+                    x + 4.0,
+                    y + 2.0,
+                    12.0,
+                    12.0,
+                    u32::MAX,
+                );
+            }
             let label = self.translate("options.title", "Options");
             horizon_client::widgets::record(&label, rect, true);
             if hovered && self.carried.is_none() {
@@ -578,7 +740,7 @@ impl Game<'_> {
                     .mods
                     .installed
                     .iter()
-                    .position(|entry| entry.id == "recipes" && entry.native.is_some())
+                    .position(|entry| entry.id == owner.native_id() && entry.native.is_some())
                 {
                     self.mod_browser_closed();
                     self.panel.recipes_settings_return = Some(self.screen);
@@ -613,6 +775,11 @@ impl Game<'_> {
             Some(page - 1)
         } else if pages > 1 && page + 1 < pages && inside(cursor, forward) {
             Some(page + 1)
+        } else if layout.classic && pages > 1 && inside(cursor, back) {
+            // The classic buttons wrap around, as JEI's.
+            Some(pages - 1)
+        } else if layout.classic && pages > 1 && inside(cursor, forward) {
+            Some(0)
         } else {
             None
         };
@@ -829,6 +996,72 @@ mod tests {
         assert!(panel.viewer_style(&jei));
         panel.set_style("jei", super::NativePanelStyle::RecipeBook);
         assert!(!panel.viewer_style(&jei));
+    }
+
+    /// JEI 1.12's overlay: the items flush right under a 20 pixel page row,
+    /// the search box at the foot of the screen with the settings button on
+    /// its right, under the window when asked and there is room.
+    #[test]
+    fn the_classic_look_lays_the_items_out_as_jei_did() {
+        let mut panel = Panel::default();
+        let jei = Owner::Native("jei".into());
+        let style = super::NativePanelStyle::Classic {
+            centred_search: true,
+            window_width: 198,
+        };
+        panel.set_style("jei", style);
+        assert!(
+            panel.viewer_style(&jei),
+            "square buttons and the search skin"
+        );
+        assert_eq!(panel.classic(&jei), Some((true, 198)));
+        assert_eq!(panel.classic(&Owner::Native("recipes".into())), None);
+
+        // A 570x473 GUI with the inventory's 176x166 window at (197, 153).
+        let screen = [570.0, 473.0];
+        let window = [197.0, 153.0, 176.0, 166.0];
+        let centred = super::classic_layout(screen, window, 0.0, true).unwrap();
+        // 375 to 568 holds ten columns, flush with the right edge.
+        assert_eq!((centred.columns, centred.grid.0), (10, 388.0));
+        // 449 pixels under the page row hold 24 rows, centred.
+        assert_eq!(
+            (centred.rows, centred.grid.1, centred.arrows_y),
+            (24, 30.0, 2.0)
+        );
+        assert_eq!(centred.search, [197.0, 451.0, 157.0, 20.0]);
+        assert_eq!(centred.settings, Some([353.0, 451.0, 20.0, 20.0]));
+        assert_eq!(
+            centred.browser_arrow_rects(true)[1],
+            [548.0, 2.0, 20.0, 20.0]
+        );
+
+        // A recipe screen 198 wide over the window: the items step right of
+        // it, and the search box goes under it.
+        let wide = super::classic_layout(screen, window, 198.0, true).unwrap();
+        assert_eq!(wide.area[0], 386.0);
+        assert_eq!(wide.search, [186.0, 451.0, 179.0, 20.0]);
+
+        // Under the items, with the rows above it.
+        let beside = super::classic_layout(screen, window, 0.0, false).unwrap();
+        assert_eq!(beside.search, [388.0, 451.0, 161.0, 20.0]);
+        assert_eq!(beside.settings, Some([548.0, 451.0, 20.0, 20.0]));
+        assert_eq!((beside.rows, beside.grid.1), (23, 28.0));
+
+        // A window reaching the foot keeps the search box under the items.
+        let tall = super::classic_layout(screen, [197.0, 153.0, 176.0, 310.0], 0.0, true).unwrap();
+        assert_eq!(tall.search[0], 388.0);
+        // Three columns: the page row keeps JEI's 80 pixels, the grid centred.
+        let few = super::classic_layout([300.0, 473.0], [62.0, 153.0, 176.0, 166.0], 0.0, false);
+        let few = few.unwrap();
+        assert_eq!(
+            (few.columns, few.grid.0, few.nav),
+            (3, 231.0, (218.0, 80.0))
+        );
+        assert_eq!(few.browser_arrow_rects(true)[1], [278.0, 2.0, 20.0, 20.0]);
+        assert_eq!(few.search, [218.0, 451.0, 61.0, 20.0]);
+        // No room for two columns: no panel.
+        let narrow = [37.0, 17.0, 176.0, 166.0];
+        assert!(super::classic_layout([250.0, 200.0], narrow, 0.0, true).is_none());
     }
 
     /// A native mod's items and recipe page are what the panel holds, and
