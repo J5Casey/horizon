@@ -11586,7 +11586,16 @@ impl Game<'_> {
     /// inventory's, a crafting table's or a mod menu type's).
     /// Unlike the recipe book click, this doesn't require learning the recipe.
     pub(super) fn native_transfer_recipe(&mut self, book_id: i32) {
-        self.transfer_viewer_recipe(book_id);
+        self.transfer_viewer_recipe(book_id, false);
+    }
+    /// `native_transfer_recipe`, and with `all` as many sets as the
+    /// inventory (and a mod crafting grid's sources) allow, as Shift on the
+    /// recipe book places: every grid slot gets the same count, capped at the
+    /// ingredients' stack size, alternatives (tags) shared out as vanilla's
+    /// `StackedItemContents` does. A server from before `all` ignores it.
+    /// API @API:transfer_recipe_all@.
+    pub(super) fn native_transfer_recipe_all(&mut self, book_id: i32, all: bool) {
+        self.transfer_viewer_recipe(book_id, all);
     }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
