@@ -314,6 +314,7 @@ mod native_reload_listeners;
 mod native_scene;
 mod native_server;
 mod native_shaders;
+mod native_slot_roles;
 mod native_structures;
 mod native_terrain_model;
 pub mod native_text_field;
@@ -562,6 +563,7 @@ pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_player_state::NativeEffect;
 pub use native_reload_listeners::NativeReloadListener;
 pub use native_server::NativeExperienceOrb;
+pub use native_slot_roles::NativeSlotRole;
 pub use native_structures::{NativeStructureBlock, NativeStructureTemplate};
 pub use native_world_columns::NativeColumnBlocks;
 pub use native_world_draw::NativeWorldDraw;
@@ -9071,6 +9073,18 @@ impl Game<'_> {
                         (kind, size)
                     }
                     Some(BlockEntity::Brewing(_)) => (Kind::Brewing, 5),
+                    // A server's content mod menu type: the server runs the
+                    // same engine over it (its crafting grid, its linked
+                    // slots), so its clicks are predicted as vanilla's.
+                    Some(BlockEntity::Mod(_)) => {
+                        match self
+                            .remote_menu_type()
+                            .and_then(horizon_client::containers::mod_menu_type)
+                        {
+                            Some(t) => (Kind::Mod(t), t.slots),
+                            None => return false,
+                        }
+                    }
                     Some(BlockEntity::Furnace(f)) => (
                         Kind::Furnace(
                             match f.kind.recipe_type().trim_start_matches("minecraft:") {
