@@ -39,6 +39,17 @@ pub(super) struct RecipeTables {
     /// The types that came before the player did: the mods hear of them
     /// once the helpers can answer (`recipes_received_now`).
     received: Option<Vec<String>>,
+    /// The stacks mods asked the recipe viewer to show
+    /// (`native_show_recipes`), heard next frame (`native_recipe_lookup`).
+    pub(super) lookups: std::sync::Mutex<
+        Vec<(
+            horizon_client::mod_api::NativeStack,
+            horizon_client::mod_api::NativeRecipeLookup,
+        )>,
+    >,
+    /// Bumped each time a mod's recipe categories change
+    /// (`native_recipe_categories_changed`).
+    pub(super) categories_version: std::sync::atomic::AtomicU64,
 }
 
 /// Item id -> its index in [`Recipes::items`].
@@ -460,5 +471,47 @@ impl Game<'_> {
             }
             Err(e) => log::warn!("Horizon: the server's recipes were not taken: {e}"),
         }
+    }
+}
+
+impl Game<'_> {
+    /// The recipe lookups mods asked for since the last frame
+    /// (`native_show_recipes`), heard by the recipe viewers.
+    pub(super) fn recipe_lookups_now(&mut self) {
+        let lookups = std::mem::take(
+            &mut *self
+                .recipe_tables
+                .lookups
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        for (stack, lookup) in lookups {
+            let mut handled = false;
+            self.native_recipe_lookup(&stack, &lookup, &mut handled);
+        }
+    }
+    /// `native_loot_odds`: the odds of the world's loot table `table`.
+    pub(super) fn loot_odds(
+        &mut self,
+        table: &str,
+        tool: Option<&str>,
+    ) -> Option<Vec<horizon_client::mod_api::NativeLootOdds>> {
+        let loot = horizon_client::structure_blocks::loot_data(
+            &self.options.resources,
+            &self.pack_files(),
+        )?;
+        let odds = loot.odds(table, tool)?;
+        Some(
+            odds.into_iter()
+                .map(|o| horizon_client::mod_api::NativeLootOdds {
+                    item: o.item,
+                    components: String::new(),
+                    chance: o.chance,
+                    min: o.min,
+                    max: o.max,
+                    conditions: o.conditions,
+                })
+                .collect(),
+        )
     }
 }
