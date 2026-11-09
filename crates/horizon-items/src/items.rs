@@ -1697,9 +1697,48 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        let Some(table) = self.loot.get(id) else {
-            return vec![];
-        };
+        self.table_raw(id, killed_by_player, held, false, random, keep_empty)
+            .unwrap_or_default()
+    }
+    /// `LootTable.getRandomItems(LootParams)` of table `id` with an ORIGIN,
+    /// `held` as the TOOL and, when `this_entity`, a THIS_ENTITY: the context
+    /// `/loot … fish` gives (`LootContextParamSets.FISHING`), which a native
+    /// mod's `roll_loot` uses. The stacks come after the stack splitter, each
+    /// at most its item's stack size. None when there is no such table.
+    pub fn roll_loot_table<R: RandomSource>(
+        &self,
+        id: &str,
+        held: Option<&ItemStack>,
+        this_entity: bool,
+        random: &mut R,
+    ) -> Option<Vec<ItemStack>> {
+        let raw = self.table_raw(id, false, held, this_entity, random, false)?;
+        // LootTable.createStackSplitter.
+        let mut out = Vec::with_capacity(raw.len());
+        for stack in raw {
+            let max = self.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
+            let mut count = stack.count;
+            while count > max {
+                let mut part = stack.clone();
+                part.count = max;
+                out.push(part);
+                count -= max;
+            }
+            out.push(ItemStack { count, ..stack });
+        }
+        Some(out)
+    }
+    /// `LootTable.getRandomItemsRaw` of table `id` with no block.
+    fn table_raw<R: RandomSource>(
+        &self,
+        id: &str,
+        killed_by_player: bool,
+        held: Option<&ItemStack>,
+        this_entity: bool,
+        random: &mut R,
+        keep_empty: bool,
+    ) -> Option<Vec<ItemStack>> {
+        let table = self.loot.get(id)?;
         let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
@@ -1708,7 +1747,7 @@ impl Items {
             held,
             killed_by_player,
             explosion_radius: None,
-            this_entity: false,
+            this_entity,
             target: None,
             location: None,
             keep_empty,
@@ -1717,7 +1756,7 @@ impl Items {
         NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
         let out = ctx.evaluate(table, random);
         NESTED_ROLLS.with(|v| v.borrow_mut().pop());
-        out
+        Some(out)
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.

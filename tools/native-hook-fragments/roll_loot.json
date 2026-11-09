@@ -1,0 +1,14 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "roll_loot",
+      "target": "horizon_client::game::native_recipes::Game<'_>::native_roll_loot"
+    }
+  ],
+  "rust_summary": "one roll of a loot table, its stacks handed back (`native_roll_loot`).",
+  "doc_summary": "`native_roll_loot(table, origin, tool)` (`host.roll_loot`) rolls the world's loot table `table` once, as `LootTable.getRandomItems` with `origin`, `tool` as the TOOL and the acting player as THIS_ENTITY (the context of `/loot … fish`), from the table's random sequence or the level's random, and hands the stacks back instead of dropping them. Mods' drop changes are not applied. None for a missing table and on a client of a server. For a sieve or a machine that turns an input into a table's roll. Bundles need \"hooks\": @API:roll_loot@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_recipes.rs"
+  ]
+}

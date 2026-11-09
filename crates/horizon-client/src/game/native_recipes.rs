@@ -511,6 +511,55 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    /// One roll of the world's loot table `table` (`salvage:salvaging/gravel`;
+    /// its data packs merged): `LootTable.getRandomItems` with `origin` as
+    /// ORIGIN, `tool` as TOOL when given and the acting player as
+    /// THIS_ENTITY, the context `/loot … fish <table> <pos> <tool>` gives. It
+    /// draws from the table's random sequence when it names one, else the
+    /// level's random, as the game's own rolls do, and the stacks come split
+    /// to their items' stack sizes. Mods' own loot kinds see `origin` and the
+    /// level; mods' changes to drops (`native_loot_drops`) are not applied.
+    /// For a sieve or a machine that turns an input into a table's roll. None
+    /// for a table that isn't there, and on a client of a server. API
+    /// @API:roll_loot@.
+    pub(super) fn native_roll_loot(
+        &mut self,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<Vec<ItemStack>> {
+        self.roll_loot(table, origin, tool)
+    }
+    /// `native_roll_loot`.
+    fn roll_loot(
+        &mut self,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<Vec<ItemStack>> {
+        if self.remote.is_some() || !world_items!(self).has_loot_table(table) {
+            return None;
+        }
+        let this_entity = self.native_acting_player().is_some();
+        let place = self.loot_place_at(origin, None);
+        horizon_world::loot::with_native_loot_place(place, || {
+            match world_items!(self).loot_sequence(table) {
+                Some(sequence) => {
+                    let random = self.rand_sequences.get(&sequence, self.level.seed);
+                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
+                }
+                None => world_items!(self).roll_loot_table(
+                    table,
+                    tool,
+                    this_entity,
+                    &mut self.world.random,
+                ),
+            }
+        })
+    }
+}
+
+impl Game<'_> {
     /// The recipe lookups mods asked for since the last frame
     /// (`native_show_recipes`), heard by the recipe viewers.
     pub(super) fn recipe_lookups_now(&mut self) {
@@ -531,3 +580,7 @@ impl Game<'_> {
 #[cfg(test)]
 #[path = "recipe_viewer_tests.rs"]
 mod recipe_viewer_tests;
+
+#[cfg(test)]
+#[path = "roll_loot_tests.rs"]
+mod roll_loot_tests;

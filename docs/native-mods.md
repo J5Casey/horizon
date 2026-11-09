@@ -4956,6 +4956,28 @@ alternatives, groups, sequences, nested tables, `random_chance` and set counts c
 (`minecraft:brush`), `match_tool` conditions are judged with that item in hand, so a block table brushed shows only
 what a brush sifts out. Conditions are taken as independent of each other. None when there is no such table.
 
+### Rolling a loot table
+
+`native_roll_loot(table, origin, tool)` (server, `host.roll_loot`) rolls the world's loot table `table` once and hands
+the stacks back instead of dropping them, for a sieve or a machine that turns an input into a table's roll:
+
+```rust
+// Server, in a use hook: one roll of a data pack's sifting table, with the hammer held.
+let tool = host.equipment(EquipmentSlot::MainHand);
+if let Some(stacks) = host.roll_loot("mymod:sifting/gravel", [x + 0.5, y + 1.0, z + 0.5], tool.as_ref()) {
+    for stack in stacks { /* into the machine's output slots */ }
+}
+```
+
+It is `LootTable.getRandomItems` with `origin` as ORIGIN, `tool` as TOOL when given and the acting player as
+THIS_ENTITY: the context `/loot … fish <table> <pos> <tool>` gives, so on the same random state it gives what that
+command gives. Weights, rolls, nested entries and tables, conditions (`match_tool` against `tool`, `random_chance`,
+`table_bonus` with its enchantments) and functions (`set_count`, `apply_bonus`, `enchant_randomly`...) all count. It
+draws from the table's `random_sequence` when it names one, else the level's random, as the game's own rolls do, and
+the stacks come split to their items' stack sizes. A mod's own loot kinds see `origin` and the level as in the game's
+rolls; mods' changes to drops (`native_loot_drops`) are not applied, since nothing drops. None when there is no such
+table, and on a client of a server.
+
 ### Recipe viewers: lookups and categories
 
 A mod that draws items on screens of its own (a quest book, a guide) can open whatever recipe viewer is installed
