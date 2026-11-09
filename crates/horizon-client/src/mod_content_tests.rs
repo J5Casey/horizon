@@ -1080,6 +1080,10 @@ fn content_root_loads_with_every_table() {
     assert_eq!(sword.modifiers.len(), 1);
     assert_eq!(sword.modifiers[0].2, 7.0);
     assert_eq!(sword.tool.len(), iron_sword.tool.len());
+    // A declared item is its template where Horizon follows it; a block's item isn't.
+    assert!(sword.is("minecraft:iron_sword") && !iron_sword.is("ruby:ruby_sword"));
+    assert_eq!(gem.template.as_deref(), Some("minecraft:diamond"));
+    assert_eq!(ruby_block.template, None);
     // The stew leaves its bowl in the grid; vanilla's stew leaves none.
     let stew = &items.items["ruby:ruby_stew"];
     assert_eq!(stew.crafting_remainder.as_deref(), Some("minecraft:bowl"));

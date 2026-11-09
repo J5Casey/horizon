@@ -652,6 +652,61 @@ pub(super) mod interact_vibration_tests {
         };
     }
 
+    /// `FishingRodItem.use` and the cast model's `FishingRodCast` take a
+    /// content mod's item copied from the rod (`ItemInfo::is`) as a rod: it
+    /// casts, is drawn cast while its hook is out, and reels in. Another item
+    /// is not a rod.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_content_mods_rod_casts_and_reels_in() {
+        let Some(_) = with_game("minecraft:stick", |game| {
+            // A world with a data pack has tables of its own, which take the mod's item.
+            let dir =
+                std::env::temp_dir().join(format!("horizon-content-rod-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let tags = dir.join("datapacks/rods/data/ruby/tags/item");
+            std::fs::create_dir_all(&tags).unwrap();
+            std::fs::write(
+                dir.join("datapacks/rods/pack.mcmeta"),
+                r#"{"pack":{"description":"fixture"}}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                tags.join("rods.json"),
+                r#"{"values":["minecraft:fishing_rod"]}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("datapacks.json"),
+                r#"{"enabled":["file/rods"],"disabled":[]}"#,
+            )
+            .unwrap();
+            game.world_root = dir.clone();
+            game.world_tables = game.build_world_tables(false, &[]).unwrap().0;
+            let items = &mut game.world_tables.as_mut().unwrap().items.items;
+            let mut info = items["minecraft:fishing_rod"].clone();
+            info.id = std::sync::Arc::from("ruby:rod");
+            info.template = Some(std::sync::Arc::from("minecraft:fishing_rod"));
+            items.insert(info.id.clone(), info);
+
+            let stick = ItemStack::new("minecraft:stick", 1);
+            assert!(!game.use_fishing_rod(&stick), "a stick is no rod");
+            assert!(game.hook.is_none());
+            let rod = ItemStack::new("ruby:rod", 1);
+            *game.held_mut() = Some(rod.clone());
+            assert!(game.main_hand_rod());
+            assert!(game.use_fishing_rod(&rod), "the mod's rod casts");
+            assert!(game.hook.is_some());
+            assert_eq!(game.cast_rod(), Some(&rod), "drawn cast");
+            assert!(game.use_fishing_rod(&rod), "and reels in");
+            assert!(game.hook.is_none());
+            assert_eq!(game.cast_rod(), None);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }) else {
+            panic!("prepared resources failed to load")
+        };
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn thrown_eye_posts_projectile_shoot_at_eye_from_player() {

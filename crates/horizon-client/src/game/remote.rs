@@ -11231,6 +11231,8 @@ fn boat_interact_passes(chest: bool, sneaking: bool, out_of_control: bool, has_r
 pub(super) fn item_has_use(info: &horizon_client::items::ItemInfo) -> bool {
     let id = info.id.trim_start_matches("minecraft:");
     id.ends_with("_spear")
+        // A content mod's rod casts as vanilla's does.
+        || info.is("minecraft:fishing_rod")
         || info.consumable.is_some()
         || info.equip_slot.is_some()
         || info.blocks_attacks.is_some()

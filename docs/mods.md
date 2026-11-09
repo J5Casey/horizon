@@ -269,6 +269,14 @@ copied. The compiled binding is used by server placement and client prediction. 
 contexts receive the original item ID, and survival placement consumes that item's stack.
 Without `place_block`, template behavior is unchanged.
 
+An item whose template is `minecraft:fishing_rod` is a fishing rod, as a NeoForge mod's
+`new FishingRodItem(...)` is: it casts, floats, bites, reels in and wears as vanilla's rod, its item
+model's `minecraft:fishing_rod/cast` is true while its bobber is out, and `native_player_fish` hears it.
+List it in `#minecraft:enchantable/fishing` for Lure and Luck of the Sea, as vanilla's rod is.
+Other behaviour that vanilla ties to an item's class, such as a bow's draw or a shield's block, still
+belongs to vanilla's item alone; components (`minecraft:tool`, `minecraft:consumable`,
+`minecraft:equippable` and the others) carry over for every template.
+
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
 JSON values become NBT values. Values must fit the network NBT limits and

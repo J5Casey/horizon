@@ -648,6 +648,10 @@ struct NewItem {
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
     place_block: Option<String>,
+    /// The vanilla item a declared item copies, whose behaviour it has where Horizon
+    /// follows its template (`ItemInfo::is`). None for a block's item or a `place_block`
+    /// item, which place their own blocks.
+    template: Option<String>,
 }
 
 struct Plan<'a> {
@@ -1195,6 +1199,7 @@ impl<'a> Plan<'a> {
                     crafting_remainder: None,
                     wall_block: b.decl.wall_block.clone(),
                     place_block: None,
+                    template: None,
                 });
             }
         }
@@ -1214,6 +1219,7 @@ impl<'a> Plan<'a> {
                     crafting_remainder: i.crafting_remainder.clone(),
                     wall_block: None,
                     place_block: i.place_block.clone(),
+                    template: i.place_block.is_none().then(|| i.template.clone()),
                 });
             }
         }
@@ -3055,6 +3061,17 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         overlay.write(
             horizon_items::items::MOD_CRAFT_REMAINDERS,
             &serde_json::to_vec(&remainders)?,
+        )?;
+    }
+    let templates: BTreeMap<&str, &str> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.template.as_deref()?)))
+        .collect();
+    if !templates.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_TEMPLATES,
+            &serde_json::to_vec(&templates)?,
         )?;
     }
     fluids::write_table(&overlay, &plan.fluids)?;

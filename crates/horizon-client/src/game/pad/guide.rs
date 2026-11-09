@@ -635,6 +635,8 @@ impl Game<'_> {
             {
                 Verb::Equip
             }
+            // A content mod's rod casts as vanilla's does.
+            _ if info.is("minecraft:fishing_rod") => Verb::Fish,
             _ if super::super::remote::item_has_use(&info) => Verb::Use,
             _ => return None,
         })

@@ -423,17 +423,20 @@ impl Game<'_> {
         self.level_set(block, old_block).unwrap();
         rows
     }
+    /// `instanceof FishingRodItem`: vanilla's rod, or a content mod's item
+    /// copied from it, which casts, floats and reels in as vanilla's does.
+    pub(super) fn is_rod(&self, stack: &ItemStack) -> bool {
+        self.items()
+            .get(&stack.item)
+            .is_some_and(|i| i.is("minecraft:fishing_rod"))
+    }
     fn holds_rod(&self) -> bool {
-        self.held()
-            .is_some_and(|s| &*s.item == "minecraft:fishing_rod")
-            || self
-                .offhand
-                .as_ref()
-                .is_some_and(|s| &*s.item == "minecraft:fishing_rod")
+        self.held().is_some_and(|s| self.is_rod(s))
+            || self.offhand.as_ref().is_some_and(|s| self.is_rod(s))
     }
     /// `FishingRodItem.use`.
     pub(super) fn use_fishing_rod(&mut self, stack: &ItemStack) -> bool {
-        if &*stack.item != "minecraft:fishing_rod" {
+        if !self.is_rod(stack) {
             return false;
         }
         // The mods hear a server player's cast or reel-in first.
@@ -521,7 +524,7 @@ impl Game<'_> {
                 random,
             });
             // FishingRodItem.use counts a cast, not a reel-in.
-            self.award_stat("used", "minecraft:fishing_rod", 1);
+            self.award_stat("used", &stack.item, 1);
             self.use_vibration(stack, "minecraft:item_interact_start");
         }
         self.swing_arm();
@@ -814,10 +817,7 @@ impl Game<'_> {
                     self.native_player_fish(uuid, &name, 1, &mut cancel);
                     // A bite has no hand of its own: the one holding the rod, the main
                     // hand first, as `FishingHook.shouldStopFishing` looks.
-                    let hand = if self
-                        .stack_in(self.selected)
-                        .is_some_and(|s| &*s.item == "minecraft:fishing_rod")
-                    {
+                    let hand = if self.stack_in(self.selected).is_some_and(|s| self.is_rod(s)) {
                         horizon_client::first_person::Hand::Main
                     } else {
                         horizon_client::first_person::Hand::Off
@@ -1262,8 +1262,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn main_hand_rod(&self) -> bool {
-        self.held()
-            .is_some_and(|s| &*s.item == "minecraft:fishing_rod")
+        self.held().is_some_and(|s| self.is_rod(s))
     }
     /// The hook's position this frame.
     fn hook_position(&self, alpha: f64) -> Option<glam::DVec3> {
