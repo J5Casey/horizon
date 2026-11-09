@@ -515,3 +515,7 @@ impl Game<'_> {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "recipe_viewer_tests.rs"]
+mod recipe_viewer_tests;
