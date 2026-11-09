@@ -2093,11 +2093,7 @@ impl Game<'_> {
         // takes those) is for the mods, from a dead player too: vanilla's handleCustomPayload doesn't
         // look at health.
         let packet = match packet {
-            S::CustomPayload(p)
-                if p.channel != horizon_protocol::quiet::CHANNEL
-                    && p.channel != horizon_protocol::mod_net::CHANNEL
-                    && p.channel != horizon_client::lod_net::CHANNEL =>
-            {
+            S::CustomPayload(p) if !horizon_channel(&p.channel) => {
                 self.guest_custom_payload(host, conn, p.channel, p.data);
                 return;
             }
@@ -6930,5 +6926,36 @@ mod unloaded_chunk_tests {
             body,
             |_, _| true
         ));
+    }
+}
+
+/// Whether a guest's plugin channel message is for one of Horizon's own handlers in
+/// `lan_guest_packet` (its `CustomPayload` arms), not for the mods.
+fn horizon_channel(channel: &str) -> bool {
+    [
+        horizon_protocol::quiet::CHANNEL,
+        horizon_protocol::mod_net::CHANNEL,
+        horizon_client::lod_net::CHANNEL,
+        horizon_client::lan::recipes::TRANSFER_CHANNEL,
+    ]
+    .contains(&channel)
+}
+
+#[cfg(test)]
+mod horizon_channel_tests {
+    use super::horizon_channel;
+
+    #[test]
+    fn horizon_channels_reach_their_handlers_and_others_go_to_the_mods() {
+        // The recipe viewer's transfer (`native_transfer_recipe`) was handed to the mods
+        // before its own arm could run, so a viewer's "+" never reached the server.
+        assert!(horizon_channel(
+            horizon_client::lan::recipes::TRANSFER_CHANNEL
+        ));
+        assert!(horizon_channel(horizon_protocol::quiet::CHANNEL));
+        assert!(horizon_channel(horizon_protocol::mod_net::CHANNEL));
+        assert!(horizon_channel(horizon_client::lod_net::CHANNEL));
+        assert!(!horizon_channel("mymod:hello"));
+        assert!(!horizon_channel("minecraft:brand"));
     }
 }
