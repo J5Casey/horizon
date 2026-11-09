@@ -186,7 +186,12 @@ recipe viewer needs.
 The pending `panel_style` helper, `native_panel_style(mod_id, style)`, lets a recipe viewer's panel look like one:
 `NativePanelStyle::Viewer` draws its page buttons as square buttons on a bar over the items and its search box with the
 viewer's skin, as Horizon's Recipes panel does; `NativePanelStyle::RecipeBook` (the default) keeps the recipe book's
-arrows. Only the drawing changes. Bundles need `"hooks": @API:panel_style@`.
+arrows. Only the drawing changes. `NativePanelStyle::Classic { centred_search, window_width }` is JEI's look on
+Minecraft 1.12: the items flush with the screen's right edge under a row of page buttons that always shows and wraps
+around, the search box at the foot of the screen (under the window when `centred_search` and there is room) with a
+settings button that opens the mod's page in Options > Mods, and a whole slot lit under the pointer; `window_width`
+lays the panel out beside a centred window that wide (a recipe screen the mod draws over the container), 0 for the
+container's own. Bundles need `"hooks": @API:panel_style@`.
 
 API 11 adds `GameLevel::native_send_particles` on authoritative servers. It sends supported
 vanilla particles to nearby players. Block particles require a valid block state. Item, trail and
