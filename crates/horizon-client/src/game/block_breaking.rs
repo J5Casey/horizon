@@ -53,7 +53,7 @@ impl Game<'_> {
         if self.ui.rules.bool("block_drops")
             && let Some(kept) = self.break_collect.as_mut()
         {
-            kept.push(stack);
+            kept.stacks.push(stack);
         }
     }
 

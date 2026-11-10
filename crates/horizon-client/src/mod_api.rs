@@ -225,6 +225,19 @@ pub struct NativeFakeUse {
     pub other: Vec<ItemStack>,
 }
 
+/// What a player's break set loose from the block itself, kept for the mod
+/// instead of popping (`Host::player_break_block_kept`): the drops rolled for
+/// the player's tool and the experience the block gave.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct NativeBreakDrops {
+    /// The block's own drops (`Block.getDrops`), each as it would have popped.
+    pub stacks: Vec<ItemStack>,
+    /// The experience points it would have dropped as orbs
+    /// (`Block.popExperience`).
+    pub experience: u32,
+}
+
 /// One tick of a bot's keys for `native_simulate_player_move`, as a client's input is
 /// (`ClientInput`, `LocalPlayer.aiStep`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

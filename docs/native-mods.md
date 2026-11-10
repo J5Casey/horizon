@@ -4443,6 +4443,13 @@ FTB Ultimine, which calls `ServerPlayerGameMode.destroyBlock` from NeoForge's `B
 - Call it from the player's `native_destroy_block` (they act there), or with any online player's UUID from a hook
   where no player acts, such as `native_server_tick`. Inside `native_destroy_block`, each block the mod breaks is
   heard by that hook too: keep a guard (an `AtomicBool`) so those breaks don't start more veins.
+- To set a whole vein's drops down in one place, as FTB Ultimine does at the block the player mined, break with
+  `native_player_break_block_kept(uuid, pos)` (`Host::player_break_block_kept`): the same break, but the block's
+  own drops and its experience come back (`NativeBreakDrops { stacks, experience }`, None when nothing broke)
+  instead of popping. Gather them, then `native_pop_break_drops(uuid, pos, stacks, experience)`
+  (`Host::pop_break_drops`) pops them at `pos` in that player's level: equal stacks merged into as few as their
+  size allows, each popped as `Block.popResource` pops a drop, the experience as orbs at the block's centre. To
+  give them to the player first, `give_stack` each and pop what comes back.
 
 ### Column reads
 

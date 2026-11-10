@@ -2,6 +2,15 @@
 //! blocks around the one its player broke as that player breaks them
 //! (docs/native-mods.md, "Breaking as a player").
 use super::Game;
+use horizon_client::{items::ItemStack, mod_api::NativeBreakDrops};
+
+/// What a player's break keeps instead of popping (`Game::break_collect`):
+/// the block's own drops, and its experience when `experience` is Some.
+#[derive(Default)]
+pub(super) struct BreakKept {
+    pub(super) stacks: Vec<ItemStack>,
+    pub(super) experience: Option<u32>,
+}
 
 impl Game<'_> {
     /// Breaks the block at `pos` as the player `uuid` breaks it, through the
@@ -48,8 +57,97 @@ impl Game<'_> {
     }
 
     fn break_as_acting_player(&mut self, pos: [i32; 3], into_inventory: bool) -> bool {
-        if !self.world.loaded(pos[0], pos[2]) {
+        let kept = into_inventory.then(BreakKept::default);
+        let Some((broke, kept)) = self.break_keeping(pos, kept) else {
             return false;
+        };
+        for stack in kept.map(|k| k.stacks).unwrap_or_default() {
+            self.give_or_drop(stack);
+        }
+        broke
+    }
+
+    /// `native_player_break_block`, with the block's own drops and its
+    /// experience kept for the mod instead of popping: the break is the same
+    /// player's break (their checks, `native_destroy_block`, the loot for
+    /// their tool, its wear, the statistic, the exhaustion), but nothing of
+    /// the block itself lands in the world, so a vein miner can gather a
+    /// whole vein's drops and set them down in one place
+    /// (`native_pop_break_drops`), as FTB Ultimine does. What else the break
+    /// sets loose (a torch losing its support, a container's contents) still
+    /// drops in the world. None, with nothing broken, wherever
+    /// `native_player_break_block` answers false; a creative player's break
+    /// keeps nothing. With the `doTileDrops` rule off nothing is kept.
+    /// API @API:player_break_drops@.
+    pub(super) fn native_player_break_block_kept(
+        &mut self,
+        uuid: u128,
+        pos: [i32; 3],
+    ) -> Option<NativeBreakDrops> {
+        if !self.native_authoritative() {
+            return None;
+        }
+        let mut answer = None;
+        self.native_as_player(uuid, |game| {
+            let kept = BreakKept {
+                stacks: Vec::new(),
+                experience: Some(0),
+            };
+            if let Some((true, Some(kept))) = game.break_keeping(pos, Some(kept)) {
+                answer = Some(NativeBreakDrops {
+                    stacks: kept.stacks,
+                    experience: kept.experience.unwrap_or(0),
+                });
+            }
+        });
+        answer
+    }
+
+    /// Sets down drops a mod gathered (`native_player_break_block_kept`) at
+    /// `pos` in the level of the player `uuid`: equal stacks merge into as
+    /// few as their size allows (FTB Ultimine's `ItemCollection`), each pops
+    /// there as `Block.popResource` pops a block's drop, and `experience`
+    /// comes out at the block's centre as orbs (`ExperienceOrb.award`).
+    /// False, with nothing set down, for a player who isn't here or is dead,
+    /// another player than the one acting, an unloaded `pos`, and off a
+    /// server. API @API:player_break_drops@.
+    pub(super) fn native_pop_break_drops(
+        &mut self,
+        uuid: u128,
+        pos: [i32; 3],
+        stacks: Vec<ItemStack>,
+        experience: u32,
+    ) -> bool {
+        if !self.native_authoritative() {
+            return false;
+        }
+        let mut done = false;
+        self.native_as_player(uuid, |game| {
+            if !game.world.loaded(pos[0], pos[2]) {
+                return;
+            }
+            for stack in merge_stacks(stacks, |s| game.max_stack(s)) {
+                let at = super::spill::pop_position(&mut game.world.random, pos);
+                game.spawn_item_own(stack, at, 10);
+            }
+            if experience > 0 {
+                game.spawn_orbs(pos.map(|c| f64::from(c) + 0.5), experience);
+            }
+            done = true;
+        });
+        done
+    }
+
+    /// Breaks `pos` as the acting player with their drops going to `kept`
+    /// (popped when None): whether it broke and what was kept, or None for
+    /// a block the checks before the break refuse.
+    fn break_keeping(
+        &mut self,
+        pos: [i32; 3],
+        kept: Option<BreakKept>,
+    ) -> Option<(bool, Option<BreakKept>)> {
+        if !self.world.loaded(pos[0], pos[2]) {
+            return None;
         }
         let state = self.world.block(pos[0], pos[1], pos[2]);
         // A survival player never finishes mining a block with no hardness:
@@ -57,27 +155,68 @@ impl Game<'_> {
         if self.res.behaviours().is_air(state)
             || (!self.creative && self.res.facts().get(state).hardness < 0.0)
         {
-            return false;
+            return None;
         }
         // ServerPlayerGameMode.handleBlockBreakAction's `mayInteract`.
         if self
             .lan_acting_spawn_protection
             .is_some_and(|radius| self.spawn_protects(radius, self.dim.id(), pos))
         {
-            return false;
+            return None;
         }
         // A break inside another's hook keeps where the outer one's drops go.
-        let outer = std::mem::replace(&mut self.break_collect, into_inventory.then(Vec::new));
+        let outer = std::mem::replace(&mut self.break_collect, kept);
         let broke = self.player_break_block(pos).unwrap_or_else(|e| {
             log::warn!("a mod's break at {pos:?} failed: {e}");
             false
         });
-        let drops = std::mem::replace(&mut self.break_collect, outer).unwrap_or_default();
-        for stack in drops {
-            self.give_or_drop(stack);
-        }
-        broke
+        let kept = std::mem::replace(&mut self.break_collect, outer);
+        Some((broke, kept))
     }
+
+    /// `Block.popExperience` for a player's break: true when the break keeps
+    /// its experience for a mod (`native_player_break_block_kept`) instead.
+    pub(super) fn keep_break_experience(&mut self, xp: u32) -> bool {
+        match self
+            .break_collect
+            .as_mut()
+            .and_then(|k| k.experience.as_mut())
+        {
+            Some(kept) => {
+                *kept = kept.saturating_add(xp);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Equal stacks (same item and components) merged into as few as `max`
+/// allows, in the order each first appeared.
+fn merge_stacks(stacks: Vec<ItemStack>, max: impl Fn(&ItemStack) -> u32) -> Vec<ItemStack> {
+    let mut merged: Vec<ItemStack> = Vec::new();
+    for mut stack in stacks {
+        let limit = max(&stack).max(1);
+        for into in merged.iter_mut() {
+            if stack.count == 0 {
+                break;
+            }
+            if into.count < limit && into.same_item_same_components(&stack) {
+                let moved = (limit - into.count).min(stack.count);
+                into.count += moved;
+                stack.count -= moved;
+            }
+        }
+        while stack.count > 0 {
+            let count = stack.count.min(limit);
+            stack.count -= count;
+            merged.push(ItemStack {
+                count,
+                ..stack.clone()
+            });
+        }
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -148,6 +287,77 @@ mod tests {
         assert!(game.native_player_break_block(uuid, ore, true));
         assert_eq!(carried(&game, "minecraft:diamond"), 1);
         assert!(!game.orbs.is_empty(), "the ore's experience");
+    }
+
+    /// Kept: the ore's diamond and its experience come back instead of
+    /// landing, the stone is gone, and popping them elsewhere sets them
+    /// down there with the experience as orbs.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kept_drops_come_back_and_pop_where_the_mod_says() {
+        let mut game = server_game();
+        let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
+        let (ore, origin) = ([7, 64, 4], [6, 64, 6]);
+        place(&mut game, ore, "minecraft:diamond_ore");
+        let kept = game.native_player_break_block_kept(uuid, ore).unwrap();
+        assert_eq!(block(&game, ore), "minecraft:air");
+        assert_eq!(kept.stacks.len(), 1);
+        assert_eq!(&*kept.stacks[0].item, "minecraft:diamond");
+        assert!((3..=7).contains(&kept.experience));
+        assert!(!popped(&game, "minecraft:diamond"));
+        assert!(game.orbs.is_empty());
+        assert_eq!(game.held().unwrap().damage, 1, "still the player's break");
+        assert!(
+            game.native_player_break_block_kept(uuid, ore).is_none(),
+            "air"
+        );
+
+        assert!(game.native_pop_break_drops(uuid, origin, kept.stacks, kept.experience));
+        let diamond = game
+            .dropped
+            .iter()
+            .find(|e| &*e.stack.item == "minecraft:diamond");
+        let at = diamond.unwrap().position;
+        assert!((at.x - 6.5).abs() <= 0.25 && (at.z - 6.5).abs() <= 0.25);
+        assert!(!game.orbs.is_empty());
+    }
+
+    /// Equal stacks fill up to their size, in first-seen order; different
+    /// components stay apart.
+    #[test]
+    fn gathered_drops_merge_into_as_few_stacks_as_fit() {
+        let stack = |item: &str, count| ItemStack::new(item, count);
+        let mut named = stack("minecraft:cobblestone", 5);
+        named.enchant("minecraft:unbreaking", 1);
+        let merged = merge_stacks(
+            vec![
+                stack("minecraft:cobblestone", 40),
+                stack("minecraft:raw_iron", 2),
+                named.clone(),
+                stack("minecraft:cobblestone", 40),
+                stack("minecraft:ender_pearl", 10),
+                stack("minecraft:raw_iron", 1),
+            ],
+            |s| {
+                if &*s.item == "minecraft:ender_pearl" {
+                    16
+                } else {
+                    64
+                }
+            },
+        );
+        let counts: Vec<(&str, u32)> = merged.iter().map(|s| (&*s.item, s.count)).collect();
+        assert_eq!(
+            counts,
+            [
+                ("minecraft:cobblestone", 64),
+                ("minecraft:raw_iron", 3),
+                ("minecraft:cobblestone", 5),
+                ("minecraft:cobblestone", 16),
+                ("minecraft:ender_pearl", 10),
+            ]
+        );
+        assert_eq!(merged[2], named);
     }
 
     /// The player's own checks hold: an adventure player whose tool has no

@@ -3060,9 +3060,10 @@ struct Game<'a> {
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
     lan_break_pos: Option<[i32; 3]>,
-    /// Where a player's break puts the block's own drops instead of popping
+    /// Where a player's break puts the block's own drops (and, for
+    /// `native_player_break_block_kept`, its experience) instead of popping
     /// them (`native_player_break_block` with `into_inventory`).
-    break_collect: Option<Vec<ItemStack>>,
+    break_collect: Option<native_player_break::BreakKept>,
     /// The name of the guest `lan_acting` acts for (`Player.getName`).
     lan_acting_name: Option<String>,
     /// Their UUID (`Player.getUUID`).
@@ -5137,7 +5138,7 @@ impl Game<'_> {
                 } else {
                     sampled_xp
                 };
-                if xp > 0 && self.ui.rules.bool("block_drops") {
+                if xp > 0 && self.ui.rules.bool("block_drops") && !self.keep_break_experience(xp) {
                     self.spawn_orbs(
                         [
                             f64::from(pos[0]) + 0.5,

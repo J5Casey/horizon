@@ -1,0 +1,12 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "player_break_block_kept", "target": "horizon_client::game::native_player_break::Game<'_>::native_player_break_block_kept"},
+    {"name": "pop_break_drops", "target": "horizon_client::game::native_player_break::Game<'_>::native_pop_break_drops"}
+  ],
+  "rust_summary": "a mod breaks a block as a player with the block's own drops and experience kept for it (`native_player_break_block_kept`), and sets gathered drops down in one place, merged (`native_pop_break_drops`), as a vein miner does.",
+  "doc_summary": "`native_player_break_block_kept(uuid, pos)` breaks a block as `native_player_break_block` does but keeps the block's own drops and experience and returns them (`NativeBreakDrops`) instead of popping them, and `native_pop_break_drops(uuid, pos, stacks, experience)` sets drops down at a block in that player's level, equal stacks merged, with the experience as orbs ([Breaking as a player](#breaking-as-a-player)). Bundles need \"hooks\": @API:player_break_drops@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_player_break.rs"
+  ]
+}
