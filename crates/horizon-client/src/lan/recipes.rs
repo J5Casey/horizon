@@ -70,13 +70,78 @@ fn recipes(dir: &Path, namespace: &str, out: &mut BTreeMap<String, Value>) {
 /// advertises support. Requests carry a menu id and resource location.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
 
-/// Horizon's optional dry run of a viewer transfer: an empty clientbound
-/// payload advertises support. A request is the menu id, a tag the client
-/// picks (its recipe book display id) and the recipe's resource location; the
-/// reply is the menu id, the tag, the transfer's result (0 done, 1 missing
-/// items, 2 no room, 3 not for this menu) and, for 1, the count of the
-/// recipe's cells nothing fills then each cell as a byte. Nothing moves.
+/// Horizon's optional check of a viewer transfer, worked out without moving
+/// anything (`Menu::check_transfer`); like `TRANSFER_CHANNEL`, an empty
+/// clientbound payload advertises it. A request is the menu id, a tag the
+/// client picks (its recipe book display id) and the recipe's resource
+/// location; the reply is the menu id, the tag, the result as
+/// `TRANSFER_CHANNEL` sends it (`result_byte`) and, for `Missing`, the count
+/// of the recipe's cells nothing fills then each cell as a byte.
 pub const CHECK_CHANNEL: &str = "horizon:recipe_check";
+
+/// What a recipe viewer's transfer into the open crafting grid does or would
+/// do (`native_transfer_recipe`, `native_transfer_recipe_check`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecipeTransferResult {
+    /// It moves a set of the recipe's ingredients into the grid.
+    Moves,
+    /// The items there are don't make a set.
+    Missing,
+    /// The grid's items have no room in the inventory.
+    NoRoom,
+    /// Not into the open menu: the recipe doesn't fit its grid, or the
+    /// server doesn't know it.
+    NotIntoMenu,
+}
+
+/// The server's answer to `native_transfer_recipe_check`: what the transfer
+/// would do, and with `Missing`, the recipe's cells nothing fills.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecipeTransferCheck {
+    /// What the transfer would do.
+    pub result: RecipeTransferResult,
+    /// With `Missing`, the recipe's cells no item fills: indices into its
+    /// `slots` as the recipe tables list them (width by height for a shaped
+    /// recipe, else its ingredients in order). Empty otherwise.
+    pub missing_cells: Vec<u32>,
+}
+
+/// A viewer transfer's result as the engine's menu gives it.
+pub fn transfer_result(
+    result: Result<(), crate::menu::place::TransferError>,
+) -> RecipeTransferResult {
+    use crate::menu::place::TransferError;
+    use RecipeTransferResult as R;
+    match result {
+        Ok(()) => R::Moves,
+        Err(TransferError::Missing) => R::Missing,
+        Err(TransferError::NoRoom) => R::NoRoom,
+        Err(TransferError::Unavailable) => R::NotIntoMenu,
+    }
+}
+
+/// The byte both transfer channels carry a result as.
+pub fn result_byte(result: RecipeTransferResult) -> u8 {
+    use RecipeTransferResult as R;
+    match result {
+        R::Moves => 0,
+        R::Missing => 1,
+        R::NoRoom => 2,
+        R::NotIntoMenu => 3,
+    }
+}
+
+/// The result a transfer channel's byte names; None for any other byte.
+pub fn byte_result(byte: u8) -> Option<RecipeTransferResult> {
+    use RecipeTransferResult as R;
+    Some(match byte {
+        0 => R::Moves,
+        1 => R::Missing,
+        2 => R::NoRoom,
+        3 => R::NotIntoMenu,
+        _ => return None,
+    })
+}
 
 /// The recipes by id in vanilla's registration order (path, then namespace),
 /// the order `RecipeManager` numbers groups and lists the stonecutter's

@@ -5,6 +5,7 @@
 //! (`ServerPlaceRecipe`). Which recipes are known comes from the advancement
 //! rewards; the open and filter settings are saved with the player.
 use super::{Game, Screen};
+use crate::game::native_hooks::{RecipeTransferCheck, RecipeTransferResult};
 use horizon_client::{
     containers::{BlockEntity, FurnaceKind},
     hud::{HudBatch, Rect, rgba},
@@ -92,7 +93,7 @@ pub(super) struct RecipeUi {
     /// The display a click last placed (`lastRecipe`), which Enter and Space
     /// place again; slot clicks keep it.
     last_clicked: Option<i32>,
-    /// The server's dry runs of viewer transfers (`native_transfer_check`).
+    /// The server's checks of viewer transfers (`native_transfer_recipe_check`).
     checks: TransferChecks,
 }
 
@@ -102,19 +103,26 @@ pub(super) struct RecipeUi {
 #[derive(Default)]
 struct TransferChecks {
     seen: Option<(i32, i32, Vec<Option<ItemStack>>)>,
-    /// By display id: when the answer came, and the answer.
-    answers: Vec<(
-        i32,
-        std::time::Instant,
-        crate::game::native_hooks::NativeTransferCheck,
-    )>,
+    answers: Vec<CheckAnswer>,
     /// The one request out: its display id and when it went.
     asked: Option<(i32, std::time::Instant)>,
 }
 
-/// An answer this old is asked again (chests beside a station change
-/// without the client seeing it).
-const CHECK_FRESH: std::time::Duration = std::time::Duration::from_millis(1000);
+/// One answer of `TransferChecks`.
+struct CheckAnswer {
+    display_id: i32,
+    /// When it came.
+    at: std::time::Instant,
+    /// How many times it was asked again for this view of the menu.
+    refreshes: u32,
+    check: RecipeTransferCheck,
+}
+
+/// How old an answer is asked again while it is wanted (chests beside a
+/// station change without the client seeing it), and how many times for one
+/// view of the menu.
+const CHECK_REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
+const CHECK_REFRESHES: u32 = 15;
 /// A request with no answer this long is given up, and another may go.
 const CHECK_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 /// The answers kept for one view of the menu.
@@ -1212,13 +1220,16 @@ impl Game<'_> {
         if !self.mod_recipe_screen()
             || (self.creative && self.craft_size != 3 && !self.mod_crafting_open())
         {
-            self.show_transfer_result(3);
+            self.show_transfer_result(RecipeTransferResult::NotIntoMenu);
             return;
         }
         if self.remote.as_ref().is_some_and(|r| !r.recipe_transfer) {
             // Older Horizon and vanilla servers still accept book clicks.
             if self.recipe_place(display_id, all).is_err() {
-                self.show_transfer_result(4);
+                self.panel.transfer_warning = Some((
+                    "horizon.recipe_transfer.unsupported",
+                    "Server requires a known recipe",
+                ));
             }
             return;
         }
@@ -1234,7 +1245,7 @@ impl Game<'_> {
             })
             .map(|entry| entry.id.clone())
         else {
-            self.show_transfer_result(3);
+            self.show_transfer_result(RecipeTransferResult::NotIntoMenu);
             return;
         };
         if self.remote.is_some() {
@@ -1260,26 +1271,21 @@ impl Game<'_> {
             result = menu.transfer_recipe(env, &id, all);
             Some(result.is_ok())
         });
-        self.show_transfer_result(match result {
-            Ok(()) => 0,
-            Err(TransferError::Missing) => 1,
-            Err(TransferError::NoRoom) => 2,
-            Err(TransferError::Unavailable) => 3,
-        });
+        self.show_transfer_result(horizon_client::lan::recipes::transfer_result(result));
         if result.is_ok() {
             self.recipe_book_changed();
         }
     }
 
-    /// `native_transfer_check`: the server's latest dry run of the viewer
-    /// transfer of `display_id` into the open crafting grid, asked for when
-    /// there is none for what the client sees now or it is a second old (one
-    /// request out at a time). None until the answer comes, outside a screen
-    /// that takes recipes, and on a server without `horizon:recipe_check`.
-    pub(super) fn transfer_check(
-        &mut self,
-        display_id: i32,
-    ) -> Option<crate::game::native_hooks::NativeTransferCheck> {
+    /// `native_transfer_recipe_check`: the server's latest check of a viewer
+    /// transfer of `display_id` into the open crafting grid. Asked for when
+    /// there is no answer for what the client sees now (the window, its state
+    /// id, the inventory and the grid), and again every `CHECK_REFRESH` while
+    /// it is wanted, at most `CHECK_REFRESHES` times for that view: chests a
+    /// station takes from change where the client can't see them. One request
+    /// out at a time. None until the answer comes, outside a screen that takes
+    /// recipes, and on a server that doesn't advertise `horizon:recipe_check`.
+    pub(super) fn transfer_recipe_check(&mut self, display_id: i32) -> Option<RecipeTransferCheck> {
         if !self.mod_recipe_screen() || !self.remote.as_ref().is_some_and(|r| r.recipe_check) {
             return None;
         }
@@ -1299,13 +1305,14 @@ impl Game<'_> {
                 ..Default::default()
             };
         }
-        let answer = (checks.answers.iter()).find(|(id, ..)| *id == display_id);
-        let stale = answer.is_none_or(|(_, at, _)| now.duration_since(*at) >= CHECK_FRESH);
-        let answer = answer.map(|(.., a)| a.clone());
-        let waiting = checks
-            .asked
-            .is_some_and(|(_, at)| now.duration_since(at) < CHECK_WAIT);
-        if stale && !waiting {
+        let answer = (checks.answers.iter()).find(|a| a.display_id == display_id);
+        let ask = match answer {
+            None => true,
+            Some(a) => a.refreshes < CHECK_REFRESHES && now.duration_since(a.at) >= CHECK_REFRESH,
+        };
+        let answer = answer.map(|a| a.check.clone());
+        let waiting = (checks.asked).is_some_and(|(_, at)| now.duration_since(at) < CHECK_WAIT);
+        if ask && !waiting {
             self.ensure_book();
             let id = (self.recipe_ui.book.as_ref())
                 .and_then(|book| book.entries.iter().find(|e| e.display_id == display_id))
@@ -1328,7 +1335,8 @@ impl Game<'_> {
     }
 
     /// The server's answer to `horizon:recipe_check`, or with no data its
-    /// word that it answers them. Kept only as the answer to the request out.
+    /// word that it answers them. Kept only as the answer to the request out,
+    /// for the view of the menu it was asked for.
     pub(super) fn remote_recipe_check(&mut self, data: &[u8]) {
         if data.is_empty() {
             if let Some(remote) = &mut self.remote {
@@ -1337,12 +1345,15 @@ impl Game<'_> {
             return;
         }
         let mut reader = horizon_protocol::buf::Reader::new(data);
-        let (Ok(container), Ok(tag), Ok(result)) = (reader.varint(), reader.varint(), reader.u8())
+        let (Ok(container), Ok(tag), Ok(byte)) = (reader.varint(), reader.varint(), reader.u8())
         else {
             return;
         };
-        let mut missing = Vec::new();
-        if result == 1 {
+        let Some(result) = horizon_client::lan::recipes::byte_result(byte) else {
+            return;
+        };
+        let mut missing_cells = Vec::new();
+        if result == RecipeTransferResult::Missing {
             let Ok(n) = reader.varint() else {
                 return;
             };
@@ -1350,7 +1361,7 @@ impl Game<'_> {
                 let Ok(cell) = reader.u8() else {
                     return;
                 };
-                missing.push(u32::from(cell));
+                missing_cells.push(u32::from(cell));
             }
         }
         let checks = &mut self.recipe_ui.checks;
@@ -1361,15 +1372,22 @@ impl Game<'_> {
             return;
         }
         checks.asked = None;
-        checks.answers.retain(|(id, ..)| *id != tag);
+        let refreshes = match checks.answers.iter().position(|a| a.display_id == tag) {
+            Some(i) => checks.answers.remove(i).refreshes + 1,
+            None => 0,
+        };
         if checks.answers.len() >= CHECK_KEPT {
             checks.answers.remove(0);
         }
-        checks.answers.push((
-            tag,
-            std::time::Instant::now(),
-            crate::game::native_hooks::NativeTransferCheck { result, missing },
-        ));
+        checks.answers.push(CheckAnswer {
+            display_id: tag,
+            at: std::time::Instant::now(),
+            refreshes,
+            check: RecipeTransferCheck {
+                result,
+                missing_cells,
+            },
+        });
     }
 
     pub(super) fn remote_recipe_transfer(&mut self, data: &[u8]) {
@@ -1386,26 +1404,29 @@ impl Game<'_> {
             && self.mod_recipe_screen()
             && self.panel.recipes.is_some()
         {
-            self.show_transfer_result(result);
+            match horizon_client::lan::recipes::byte_result(result) {
+                Some(result) => self.show_transfer_result(result),
+                None => self.panel.transfer_warning = None,
+            }
         }
     }
 
-    fn show_transfer_result(&mut self, result: u8) {
-        if result == 0 {
+    fn show_transfer_result(&mut self, result: RecipeTransferResult) {
+        if result == RecipeTransferResult::Moves {
             self.close_transferred_recipe();
         }
         self.panel.transfer_warning = match result {
-            1 => Some(("horizon.recipe_transfer.missing", "Missing Items")),
-            2 => Some(("horizon.recipe_transfer.no_room", "Inventory full")),
-            3 => Some((
+            RecipeTransferResult::Moves => None,
+            RecipeTransferResult::Missing => {
+                Some(("horizon.recipe_transfer.missing", "Missing Items"))
+            }
+            RecipeTransferResult::NoRoom => {
+                Some(("horizon.recipe_transfer.no_room", "Inventory full"))
+            }
+            RecipeTransferResult::NotIntoMenu => Some((
                 "horizon.recipe_transfer.unavailable",
                 "Recipe does not fit this menu",
             )),
-            4 => Some((
-                "horizon.recipe_transfer.unsupported",
-                "Server requires a known recipe",
-            )),
-            _ => None,
         };
     }
 

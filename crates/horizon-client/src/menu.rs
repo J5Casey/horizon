@@ -328,6 +328,7 @@ const RESULT: usize = 3;
 const CONTAINER_MAX: u32 = 99;
 const OFFHAND: usize = 40;
 
+#[derive(Clone)]
 pub struct Menu {
     kind: Kind,
     slots: Vec<Slot>,

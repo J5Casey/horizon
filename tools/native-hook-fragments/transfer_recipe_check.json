@@ -1,0 +1,12 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "transfer_recipe_check",
+      "target": "horizon_client::game::native_recipes::Game<'_>::native_transfer_recipe_check"
+    }
+  ],
+  "rust_summary": "what a recipe viewer transfer would do, worked out on the server without moving anything (`native_transfer_recipe_check`): which inputs nothing fills, the mods' recipe sources counted.",
+  "doc_summary": "`native_transfer_recipe_check(book_id) -> Option<RecipeTransferCheck>` (client) asks the server what `native_transfer_recipe(book_id)` would do now (`horizon:recipe_check`): the same matching and placement, on a copy of the open crafting menu, the player's inventory and every `native_recipe_sources` container counted, which the client can't see (a crafting station's chests). The server only reads: no slot, block entity or `container_changed`, and no packet but the reply. The answer's `result` is a `RecipeTransferResult` (`Moves`, `Missing`, `NoRoom`, `NotIntoMenu`); with `Missing`, `missing_cells` lists the recipe's slots nothing fills, as indices into its `slots` (width by height when shaped), for a viewer's \"+\" to mark them red. The first call returns None and asks; the answer comes a moment later and is kept while the menu, the inventory and the grid stay as they were; while wanted it is asked again every 2 s, at most 15 times for one state of the menu, one request out at a time. The server answers ten at once, then one a second, and drops the rest. None outside a screen that takes recipes and on a server from before it. Bundles need \"hooks\": @API:transfer_recipe_check@.",
+  "comments": []
+}

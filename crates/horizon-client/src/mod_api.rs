@@ -55,6 +55,7 @@ pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthHud, HealthInputs};
 pub use crate::item_data::StackData;
 pub use crate::items::ItemStack;
+pub use crate::lan::recipes::{RecipeTransferCheck, RecipeTransferResult};
 pub use crate::merchant::MerchantOffer;
 pub use crate::mesher::TintSource;
 pub use crate::mobs::goals::{Cx, Goal, GoalSelector};
@@ -454,21 +455,6 @@ pub struct NativeStack {
     pub item: String,
     pub count: u32,
     pub components: String,
-}
-
-/// A recipe viewer's transfer tried on the server and undone
-/// (`native_transfer_check`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NativeTransferCheck {
-    /// What the transfer would do: 0 move the ingredients, 1 not with the
-    /// items there are, 2 no room in the inventory for what the grid holds,
-    /// 3 not into the open menu (the recipe doesn't fit it, or the server
-    /// doesn't know it).
-    pub result: u8,
-    /// With 1, the recipe's slots nothing fills: indices into its `slots`
-    /// as the recipe tables list them (width by height for a shaped recipe,
-    /// else its ingredients in order).
-    pub missing: Vec<u32>,
 }
 
 /// One item a loot table can drop and its odds (`native_loot_odds`).
