@@ -1008,6 +1008,7 @@ use crate::mod_api::NativeTextField;
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::EntityDataValue;
 pub(crate) use horizon_client::mod_api::NativeLootOdds;
+pub(crate) use horizon_client::mod_api::NativeTransferCheck;
 use horizon_client::mod_api::{
     self, AttachmentResult, Attachments, BlockProperties, Holder, HudMode, LayerDefinition,
     NativeBossBar, NativeCamera, NativeCommand, NativeDispensed, NativeFishingMedium,

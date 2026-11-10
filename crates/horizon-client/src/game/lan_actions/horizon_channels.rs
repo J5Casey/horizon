@@ -8,6 +8,7 @@ pub(super) fn horizon_channel(channel: &str) -> bool {
         horizon_protocol::mod_net::CHANNEL,
         horizon_client::lod_net::CHANNEL,
         horizon_client::lan::recipes::TRANSFER_CHANNEL,
+        horizon_client::lan::recipes::CHECK_CHANNEL,
     ]
     .contains(&channel)
 }

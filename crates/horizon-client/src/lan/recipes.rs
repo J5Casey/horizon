@@ -70,6 +70,14 @@ fn recipes(dir: &Path, namespace: &str, out: &mut BTreeMap<String, Value>) {
 /// advertises support. Requests carry a menu id and resource location.
 pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
 
+/// Horizon's optional dry run of a viewer transfer: an empty clientbound
+/// payload advertises support. A request is the menu id, a tag the client
+/// picks (its recipe book display id) and the recipe's resource location; the
+/// reply is the menu id, the tag, the transfer's result (0 done, 1 missing
+/// items, 2 no room, 3 not for this menu) and, for 1, the count of the
+/// recipe's cells nothing fills then each cell as a byte. Nothing moves.
+pub const CHECK_CHANNEL: &str = "horizon:recipe_check";
+
 /// The recipes by id in vanilla's registration order (path, then namespace),
 /// the order `RecipeManager` numbers groups and lists the stonecutter's
 /// recipes in, and so the order the host's own tables keep.

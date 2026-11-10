@@ -15,6 +15,7 @@ use super::{
 use horizon_client::{
     crafting::{Ingredient, recipe_id},
     items::ItemStack,
+    mod_api::NativeTransferCheck,
     recipe_book::{Category, Display},
     stations::Smithing,
 };
@@ -152,6 +153,19 @@ impl Game<'_> {
     /// API @API:transfer_recipe_all@.
     pub(super) fn native_transfer_recipe_all(&mut self, book_id: i32, all: bool) {
         self.transfer_viewer_recipe(book_id, all);
+    }
+    /// What the server says a viewer transfer of `book_id` into the open
+    /// crafting grid would do, tried and undone there with the same placement
+    /// as `native_transfer_recipe`: the player's inventory and every source a
+    /// mod adds (`native_recipe_sources`, a crafting station's chests) counted,
+    /// which the client can't see. For a recipe viewer's "+": which inputs
+    /// lack, in red. The first call for a recipe asks and returns None; the
+    /// answer comes a moment later, and is asked again when the inventory or
+    /// the menu changes and once a second while it is wanted, one request
+    /// out at a time. None outside a screen that takes recipes and on a
+    /// server from before it. Client-side. API @API:transfer_check@.
+    pub(super) fn native_transfer_check(&mut self, book_id: i32) -> Option<NativeTransferCheck> {
+        self.transfer_check(book_id)
     }
     /// `native_place_recipe`: refused as `recipes.place` refuses it.
     pub(super) fn recipe_place(&mut self, book_id: i32, all: bool) -> Result<(), String> {

@@ -15,7 +15,7 @@ use horizon_client::{
     },
     menu::{
         Env, Input, Kind, Menu,
-        place::{PostPlace, TransferError},
+        place::{PostPlace, TransferCheck, TransferError},
     },
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -663,6 +663,118 @@ impl Game<'_> {
                 data: reply.data,
             },
         ));
+    }
+
+    /// A viewer's dry run of a transfer (`horizon:recipe_check`): the same
+    /// placement `guest_recipe_transfer` makes, the mods' recipe sources
+    /// counted, on a copy of the menu, so nothing moves and nothing is sent
+    /// but the answer. Throttled as commands are: past ten at once, one a tick.
+    pub(super) fn guest_recipe_check(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
+        use horizon_protocol::buf::{Reader, Writer};
+        let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+            return;
+        };
+        let g = &host.hub.guests[gi];
+        if g.brand != "horizon" || g.spectator() {
+            return;
+        }
+        let mut reader = Reader::new(data);
+        let (Ok(container), Ok(tag), Ok(id)) =
+            (reader.varint(), reader.varint(), reader.string(512))
+        else {
+            return;
+        };
+        if reader.remaining() != 0 {
+            return;
+        }
+        let play = host.play.entry(conn).or_default();
+        if play.recipe_checks > 200 {
+            return;
+        }
+        play.recipe_checks += 20;
+        let check = if container == 0 && (g.menu.is_some() || g.creative()) {
+            None
+        } else {
+            self.lan_check_recipe(host, gi, container, &id)
+        };
+        let check = check.unwrap_or(TransferCheck {
+            result: Err(TransferError::Unavailable),
+            missing: Vec::new(),
+        });
+        let mut reply = Writer::new();
+        reply.varint(container);
+        reply.varint(tag);
+        reply.u8(match check.result {
+            Ok(()) => 0,
+            Err(TransferError::Missing) => 1,
+            Err(TransferError::NoRoom) => 2,
+            Err(TransferError::Unavailable) => 3,
+        });
+        if check.result == Err(TransferError::Missing) {
+            let cells: Vec<u8> = (check.missing.iter())
+                .filter_map(|&c| u8::try_from(c).ok())
+                .collect();
+            reply.varint(cells.len() as i32);
+            for c in cells {
+                reply.u8(c);
+            }
+        }
+        host.hub.guests[gi].send(&C::CustomPayload(
+            horizon_protocol::packets::configuration::CustomPayload {
+                channel: horizon_client::lan::recipes::CHECK_CHANNEL.into(),
+                data: reply.data,
+            },
+        ));
+    }
+
+    /// `Menu::check_transfer` of recipe `id` on a copy of guest `gi`'s window
+    /// `container` as `lan_apply_recipe` builds it (the inventory's grid, a
+    /// crafting table's, or a mod crafting menu's with its recipe sources);
+    /// None when that window is none of them.
+    fn lan_check_recipe(
+        &mut self,
+        host: &mut LanHost,
+        gi: usize,
+        container: i32,
+        id: &str,
+    ) -> Option<TransferCheck> {
+        let conn = host.hub.guests[gi].conn;
+        let (mut menu, grid, sources) =
+            if let Some((pos, t)) = self.lan_mod_crafting_window(host, gi, container) {
+                let Some(BlockEntity::Mod(m)) = self.world.block_entities.get(&pos) else {
+                    return None;
+                };
+                let mut items = m.items.clone();
+                items.resize(t.slots, None);
+                let sources = self.lan_recipe_sources(host, gi, t, pos);
+                (Box::new(Menu::new(Kind::Mod(t))), items, sources)
+            } else if container == 0 {
+                let mut grid = vec![None];
+                grid.extend(host.hub.guests[gi].craft_grid.iter().cloned());
+                (Box::new(Menu::new(Kind::Inventory)), grid, Vec::new())
+            } else {
+                let (_, _, table, _) = host
+                    .play
+                    .get(&conn)
+                    .and_then(|play| play.crafting.table.as_ref())
+                    .filter(|(w, ..)| *w == container)?;
+                let grid = (0..10).map(|s| table.slot(s).cloned()).collect();
+                (Box::new(Menu::new(Kind::Crafting)), grid, Vec::new())
+            };
+        menu.sources = sources.into_iter().map(|(_, items)| items).collect();
+        let env = Env {
+            known_recipes: Some(&host.hub.guests[gi].recipe_book),
+            ..self.menu_env()
+        };
+        load_player(&mut menu, &host.hub.guests[gi]);
+        if matches!(menu.kind(), Kind::Mod(_)) {
+            menu.load_container(&env, &grid);
+        } else {
+            for (s, stack) in grid.into_iter().enumerate().skip(1) {
+                menu.set_slot(&env, s, stack);
+            }
+        }
+        Some(menu.check_transfer(&env, id))
     }
 
     fn lan_apply_recipe<R>(

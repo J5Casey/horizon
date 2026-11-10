@@ -306,6 +306,14 @@ pub enum TransferError {
     Unavailable,
 }
 
+/// A viewer transfer tried and undone (`Menu::check_transfer`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferCheck {
+    pub result: Result<(), TransferError>,
+    /// The recipe's cells the items can't fill, when `result` is `Missing`.
+    pub missing: Vec<usize>,
+}
+
 /// The menu slots a placement works on.
 struct Grid {
     width: usize,
@@ -488,6 +496,51 @@ impl Menu {
         }
         self.recompute(env);
         Ok(())
+    }
+
+    /// A viewer transfer of one set of `id`, tried and undone: what
+    /// `transfer_recipe` would answer, and when the items are missing, the
+    /// recipe's cells nothing can fill (indices into its pattern, width by
+    /// height for a shaped recipe, else its ingredient list, as the recipe
+    /// book shows it). The cells are found one ingredient at a time in order,
+    /// each kept when the counted items still cover it with the ones kept
+    /// before, as `StackedItemContents` matches them. The menu, its sources
+    /// and its drops are left as they were.
+    pub fn check_transfer(&mut self, env: &Env, id: &str) -> TransferCheck {
+        let containers = self.containers.clone();
+        let sources = self.sources.clone();
+        let (drops, dropped) = (self.drops.len(), self.dropped.len());
+        let result = self.transfer_recipe(env, id, false);
+        self.containers = containers;
+        self.sources = sources;
+        self.drops.truncate(drops);
+        self.dropped.truncate(dropped);
+        let missing = match result {
+            Err(TransferError::Missing) => self.missing_cells(env, id),
+            _ => Vec::new(),
+        };
+        TransferCheck { result, missing }
+    }
+
+    /// The cells of recipe `id` the counted items can't fill (`check_transfer`).
+    fn missing_cells(&self, env: &Env, id: &str) -> Vec<usize> {
+        let Some(placement) = env.recipes.placement(id) else {
+            return Vec::new();
+        };
+        let mut stacked = self.stacked_for(env, true);
+        let mut kept: Vec<&Ingredient> = Vec::new();
+        let mut lacking = Vec::new();
+        for (k, ingredient) in placement.ingredients.iter().enumerate() {
+            kept.push(ingredient);
+            if !stacked.try_pick(&kept, 1, None) {
+                kept.pop();
+                lacking.push(k as i32);
+            }
+        }
+        (placement.slots.iter().enumerate())
+            .filter(|(_, k)| lacking.contains(k))
+            .map(|(cell, _)| cell)
+            .collect()
     }
 
     /// `recipeMatches`: the recipe already fills the grid.
@@ -744,6 +797,8 @@ impl Menu {
 
 #[cfg(test)]
 mod transfer_all_tests;
+#[cfg(test)]
+mod transfer_check_tests;
 
 #[cfg(test)]
 mod tests {

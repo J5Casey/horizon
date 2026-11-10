@@ -1498,6 +1498,12 @@ impl Hub {
                     data: Vec::new(),
                 },
             ));
+            g.send(&C::CustomPayload(
+                horizon_protocol::packets::configuration::CustomPayload {
+                    channel: super::recipes::CHECK_CHANNEL.into(),
+                    data: Vec::new(),
+                },
+            ));
         }
         // PlayerList.sendPlayerPermissionLevel, then the recipe book.
         self.send_permission_level(i);

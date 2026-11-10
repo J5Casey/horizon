@@ -526,6 +526,8 @@ pub(super) struct Remote {
     pub(super) save_folder: Option<String>,
     pub brand: String,
     pub(super) recipe_transfer: bool,
+    /// The server answers `horizon:recipe_check`, a viewer transfer's dry run.
+    pub(super) recipe_check: bool,
     /// This connection's configured feature flags, carried through reconfiguration.
     pub(super) features: Vec<String>,
     /// The server announced it runs mods' quiet commands.
@@ -1147,6 +1149,7 @@ impl Game<'_> {
             save_folder: None,
             brand: "unknown".into(),
             recipe_transfer: false,
+            recipe_check: false,
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
@@ -1380,6 +1383,7 @@ impl Game<'_> {
             save_folder: None,
             brand: "horizon-studio".into(),
             recipe_transfer: false,
+            recipe_check: false,
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
@@ -2160,6 +2164,10 @@ impl Game<'_> {
         Some(names)
     }
     /// The open menu's window id (0: the inventory).
+    /// The open menu's state id as the server last set it.
+    pub(super) fn remote_state_id(&self) -> i32 {
+        self.remote.as_ref().map_or(0, |r| r.state_id)
+    }
     pub(super) fn remote_menu_id(&self) -> i32 {
         self.remote
             .as_ref()
@@ -3372,6 +3380,9 @@ impl Game<'_> {
             }
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
                 self.remote_recipe_transfer(&p.data);
+            }
+            C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CHECK_CHANNEL => {
+                self.remote_recipe_check(&p.data);
             }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {

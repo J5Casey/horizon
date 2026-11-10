@@ -1,0 +1,12 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "transfer_check",
+      "target": "horizon_client::game::native_recipes::Game<'_>::native_transfer_check"
+    }
+  ],
+  "rust_summary": "a recipe viewer transfer tried on the server and undone (`native_transfer_check`): which inputs nothing fills, the mods' recipe sources counted.",
+  "doc_summary": "`native_transfer_check(book_id) -> Option<NativeTransferCheck>` (client) asks the server to try `native_transfer_recipe(book_id)` on a copy of the open crafting menu and undo it (`horizon:recipe_check`): the same placement, the player's inventory and every `native_recipe_sources` container counted, which the client can't see (a crafting station's chests). The answer's `result` is 0 (it would move the ingredients), 1 (items missing), 2 (no room) or 3 (not into this menu); with 1, `missing` lists the recipe's slots nothing fills, as indices into its `slots` (width by height when shaped), for a viewer's \"+\" to mark them red. The first call returns None and asks; the answer comes a moment later and is asked again when the inventory or the menu changes and once a second while wanted, one request out at a time; the server answers ten at once, then one a tick. None outside a screen that takes recipes and on a server from before it. Bundles need \"hooks\": @API:transfer_check@.",
+  "comments": []
+}

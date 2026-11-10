@@ -92,7 +92,33 @@ pub(super) struct RecipeUi {
     /// The display a click last placed (`lastRecipe`), which Enter and Space
     /// place again; slot clicks keep it.
     last_clicked: Option<i32>,
+    /// The server's dry runs of viewer transfers (`native_transfer_check`).
+    checks: TransferChecks,
 }
+
+/// The server's answers to `horizon:recipe_check`, for what the client last
+/// saw of the open menu: its window, its state id, and the inventory and
+/// grid. Any change there forgets them.
+#[derive(Default)]
+struct TransferChecks {
+    seen: Option<(i32, i32, Vec<Option<ItemStack>>)>,
+    /// By display id: when the answer came, and the answer.
+    answers: Vec<(
+        i32,
+        std::time::Instant,
+        crate::game::native_hooks::NativeTransferCheck,
+    )>,
+    /// The one request out: its display id and when it went.
+    asked: Option<(i32, std::time::Instant)>,
+}
+
+/// An answer this old is asked again (chests beside a station change
+/// without the client seeing it).
+const CHECK_FRESH: std::time::Duration = std::time::Duration::from_millis(1000);
+/// A request with no answer this long is given up, and another may go.
+const CHECK_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+/// The answers kept for one view of the menu.
+const CHECK_KEPT: usize = 64;
 
 impl RecipeUi {
     /// A new screen starts without a ghost recipe, overlay or search focus.
@@ -1243,6 +1269,107 @@ impl Game<'_> {
         if result.is_ok() {
             self.recipe_book_changed();
         }
+    }
+
+    /// `native_transfer_check`: the server's latest dry run of the viewer
+    /// transfer of `display_id` into the open crafting grid, asked for when
+    /// there is none for what the client sees now or it is a second old (one
+    /// request out at a time). None until the answer comes, outside a screen
+    /// that takes recipes, and on a server without `horizon:recipe_check`.
+    pub(super) fn transfer_check(
+        &mut self,
+        display_id: i32,
+    ) -> Option<crate::game::native_hooks::NativeTransferCheck> {
+        if !self.mod_recipe_screen() || !self.remote.as_ref().is_some_and(|r| r.recipe_check) {
+            return None;
+        }
+        let now = std::time::Instant::now();
+        let seen = (
+            self.remote_menu_id(),
+            self.remote_state_id(),
+            (self.inventory.iter().take(36))
+                .chain(&self.craft_grid)
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        let checks = &mut self.recipe_ui.checks;
+        if checks.seen.as_ref() != Some(&seen) {
+            *checks = TransferChecks {
+                seen: Some(seen),
+                ..Default::default()
+            };
+        }
+        let answer = (checks.answers.iter()).find(|(id, ..)| *id == display_id);
+        let stale = answer.is_none_or(|(_, at, _)| now.duration_since(*at) >= CHECK_FRESH);
+        let answer = answer.map(|(.., a)| a.clone());
+        let waiting = checks
+            .asked
+            .is_some_and(|(_, at)| now.duration_since(at) < CHECK_WAIT);
+        if stale && !waiting {
+            self.ensure_book();
+            let id = (self.recipe_ui.book.as_ref())
+                .and_then(|book| book.entries.iter().find(|e| e.display_id == display_id))
+                .map(|e| e.id.clone());
+            if let Some(id) = id {
+                let mut request = horizon_protocol::buf::Writer::new();
+                request.varint(self.remote_menu_id());
+                request.varint(display_id);
+                request.string(&id);
+                self.send(horizon_protocol::packets::play::Serverbound::CustomPayload(
+                    horizon_protocol::packets::configuration::CustomPayload {
+                        channel: horizon_client::lan::recipes::CHECK_CHANNEL.into(),
+                        data: request.data,
+                    },
+                ));
+                self.recipe_ui.checks.asked = Some((display_id, now));
+            }
+        }
+        answer
+    }
+
+    /// The server's answer to `horizon:recipe_check`, or with no data its
+    /// word that it answers them. Kept only as the answer to the request out.
+    pub(super) fn remote_recipe_check(&mut self, data: &[u8]) {
+        if data.is_empty() {
+            if let Some(remote) = &mut self.remote {
+                remote.recipe_check = true;
+            }
+            return;
+        }
+        let mut reader = horizon_protocol::buf::Reader::new(data);
+        let (Ok(container), Ok(tag), Ok(result)) = (reader.varint(), reader.varint(), reader.u8())
+        else {
+            return;
+        };
+        let mut missing = Vec::new();
+        if result == 1 {
+            let Ok(n) = reader.varint() else {
+                return;
+            };
+            for _ in 0..n.clamp(0, 256) {
+                let Ok(cell) = reader.u8() else {
+                    return;
+                };
+                missing.push(u32::from(cell));
+            }
+        }
+        let checks = &mut self.recipe_ui.checks;
+        if reader.remaining() != 0
+            || checks.asked.map(|(id, _)| id) != Some(tag)
+            || checks.seen.as_ref().map(|s| s.0) != Some(container)
+        {
+            return;
+        }
+        checks.asked = None;
+        checks.answers.retain(|(id, ..)| *id != tag);
+        if checks.answers.len() >= CHECK_KEPT {
+            checks.answers.remove(0);
+        }
+        checks.answers.push((
+            tag,
+            std::time::Instant::now(),
+            crate::game::native_hooks::NativeTransferCheck { result, missing },
+        ));
     }
 
     pub(super) fn remote_recipe_transfer(&mut self, data: &[u8]) {

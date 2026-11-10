@@ -64,6 +64,9 @@ pub(super) struct GuestPlay {
     pub(super) chat_spam: u32,
     /// `commandSpamThrottler`: 20 for each command, one less each tick.
     pub(super) command_spam: u32,
+    /// The recipe viewer's dry runs (`horizon:recipe_check`): 20 for each, one
+    /// less each tick; one past the limit goes unanswered.
+    pub(super) recipe_checks: u32,
     /// `ServerCommandSuggestionsProvider`: the latest suggestion request not answered yet (a
     /// newer one replaces it, which then never gets an answer), and whether this tick's one
     /// answer is still free.
@@ -2923,6 +2926,9 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
                 self.guest_recipe_transfer(host, conn, &p.data);
             }
+            S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CHECK_CHANNEL => {
+                self.guest_recipe_check(host, conn, &p.data);
+            }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {
@@ -4272,6 +4278,7 @@ impl Game<'_> {
             let play = host.play.entry(conn).or_default();
             play.chat_spam = play.chat_spam.saturating_sub(1);
             play.command_spam = play.command_spam.saturating_sub(1);
+            play.recipe_checks = play.recipe_checks.saturating_sub(1);
             // commandSuggestionsProvider.tick: one answer a tick, to the latest request.
             play.suggestion_budget = true;
             self.guest_try_suggestions(host, conn);
@@ -6918,6 +6925,7 @@ mod horizon_channel_tests {
         assert!(horizon_channel(
             horizon_client::lan::recipes::TRANSFER_CHANNEL
         ));
+        assert!(horizon_channel(horizon_client::lan::recipes::CHECK_CHANNEL));
         assert!(horizon_channel(horizon_protocol::quiet::CHANNEL));
         assert!(horizon_channel(horizon_protocol::mod_net::CHANNEL));
         assert!(horizon_channel(horizon_client::lod_net::CHANNEL));
