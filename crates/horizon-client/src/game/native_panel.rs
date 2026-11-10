@@ -282,7 +282,9 @@ fn classic_layout(
     let rows = ((bottom - top) / SLOT).floor().max(0.0) as usize;
     let y = top + ((bottom - top - rows as f32 * SLOT) / 2.0).floor();
     (rows > 0).then_some(Layout {
-        area: [left, 0.0, right - left, height],
+        // The grid can start left of `left` when it is centred in the
+        // minimum-width page row, so the area reaches back to cover it.
+        area: [left.min(x), 0.0, right - left.min(x), height],
         grid: (x, y),
         columns,
         rows,
@@ -1058,6 +1060,9 @@ mod tests {
             (3, 231.0, (218.0, 80.0))
         );
         assert_eq!(few.browser_arrow_rects(true)[1], [278.0, 2.0, 20.0, 20.0]);
+        // The area covers the first column's left pixels (x 231 to 239).
+        assert!(few.area[0] <= few.grid.0);
+        assert!(super::inside((few.grid.0 + 1.0, few.grid.1 + 1.0), few.area));
         assert_eq!(few.search, [218.0, 451.0, 61.0, 20.0]);
         // No room for two columns: no panel.
         let narrow = [37.0, 17.0, 176.0, 166.0];
