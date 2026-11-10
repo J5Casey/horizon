@@ -357,7 +357,7 @@ impl Menu {
     /// enchanted and renamed ones too, as crafting by hand takes them.
     fn stacked_for(&self, env: &Env, viewer: bool) -> Stacked {
         let mut stacked = Stacked::default();
-        let mut account = |stacked: &mut Stacked, stack: &ItemStack| {
+        let account = |stacked: &mut Stacked, stack: &ItemStack| {
             if viewer {
                 stacked.account_stack(stack, Self::max_stack(env, stack));
             } else {
