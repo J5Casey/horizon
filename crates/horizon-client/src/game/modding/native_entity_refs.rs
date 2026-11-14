@@ -457,13 +457,13 @@ impl Game<'_> {
         Some(
             odds.into_iter()
                 .filter_map(|o| {
-                    Some(mod_api::LootOdds {
-                        item: mod_api::__private::item_key(&o.item)?,
-                        chance: o.chance,
-                        min: o.min,
-                        max: o.max,
-                        conditions: o.conditions,
-                    })
+                    Some(mod_api::LootOdds::new(
+                        mod_api::__private::item_key(&o.item)?,
+                        o.chance,
+                        o.min,
+                        o.max,
+                        o.conditions,
+                    ))
                 })
                 .collect(),
         )

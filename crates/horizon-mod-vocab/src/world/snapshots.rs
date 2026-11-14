@@ -82,7 +82,7 @@ pub struct LootStack {
 /// One item a loot table can give and its odds from one roll of the table, as
 /// `LevelRef::loot_odds` works them out: for a recipe viewer that lists a table's outputs.
 #[derive(Clone, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
+#[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct LootOdds {
     /// The item.
@@ -96,6 +96,18 @@ pub struct LootOdds {
     /// The conditions on its way that could not be judged (a tool when none was named, the
     /// weather, a killer), as short English lines; they were taken as met.
     pub conditions: Vec<String>,
+}
+impl LootOdds {
+    /// The odds of `item`, as the game works them out.
+    pub fn new(item: ItemKey, chance: f64, min: u32, max: u32, conditions: Vec<String>) -> Self {
+        Self {
+            item,
+            chance,
+            min,
+            max,
+            conditions,
+        }
+    }
 }
 
 /// A deferred exploration-map search requested by a loot function.
