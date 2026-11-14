@@ -339,12 +339,12 @@ impl Game<'_> {
     }
 
     /// `RecipesClientHost::recipe_book_ids`: the display ids the recipe book
-    /// gives `recipe_id`, from the same index `transfer_recipe` reads.
+    /// gives `recipe_id`, as `transfer_recipe` looks them up.
     pub(in crate::game) fn recipe_book_ids(&mut self, recipe_id: &str) -> Arc<[i32]> {
         if self.player.is_none() || self.res.rest.get().is_none() {
             return Arc::from([]);
         }
-        self.display_index().display_ids(recipe_id).collect()
+        self.viewer_book_ids(recipe_id).into()
     }
 
     fn make_mod_recipes(&mut self) -> Recipes {
