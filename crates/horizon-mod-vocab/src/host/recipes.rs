@@ -117,8 +117,9 @@ pub trait RecipesClientHost {
     /// viewer, which has the recipe from `recipes_of_type` and needs its id
     /// for "+". Empty for a recipe the book doesn't show (campfire,
     /// stonecutting, smithing, a mod's own type), an unknown id, and outside
-    /// a world. They follow the server's recipes once those arrived
-    /// (`recipes_received`), so ask again after that hook.
+    /// a world. A server numbers the recipes it sends itself and they follow
+    /// its recipes once those arrived (`recipes_received`): ask again after
+    /// that hook rather than keeping them.
     #[access(WorldOnly)]
     fn recipe_book_ids(&mut self, recipe_id: &str) -> Arc<[i32]>;
 }
