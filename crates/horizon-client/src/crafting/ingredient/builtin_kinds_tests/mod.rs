@@ -9,9 +9,11 @@ fn load() -> LoadContext {
         [],
     )
 }
+
 fn parse(source: &str, items: &Items) -> Ingredient {
     Ingredient::parse(&serde_json::from_str(source).unwrap(), items).unwrap()
 }
+
 fn resources() -> Items {
     let root = std::path::PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources"),

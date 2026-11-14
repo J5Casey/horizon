@@ -7,7 +7,8 @@
 //! `points.json` is the compiled slot catalog. These are build outputs, never committed.
 
 use crate::replace::marked;
-use crate::source::{crate_files, crate_root, game_files, gated, offset, owner, plain_path, unraw};
+use crate::source::{crate_files, crate_root, game_files, offset, owner, plain_path, unraw};
+use mod_source::modules::gated;
 use quote::{ToTokens, quote};
 use std::{
     fs,
@@ -402,7 +403,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
         let path = root.join("crates/horizon-mod-wasm/tests/fixture/src/points.rs");
         if path.is_file() {
             files.push((
-                crate::source::GameFile {
+                mod_source::modules::ModuleFile {
                     module: "listener_fixture".into(),
                     path,
                     cfg: Vec::new(),

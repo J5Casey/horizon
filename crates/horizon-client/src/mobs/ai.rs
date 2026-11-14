@@ -3708,7 +3708,7 @@ pub fn custom_travel(
         // Shulkers never move on their own.
         Family::Shulker => true,
         Family::Allay => super::allay::travel(m, w, level, input, events),
-        Family::Vex => super::vex::travel(m),
+        Family::Vex => super::vex::travel(m, w),
         Family::Nautilus => super::nautilus::travel(m, w, level, input, events),
         _ => false,
     }

@@ -26,11 +26,17 @@ struct Scan {
 /// A Wire type a dependent can reach only through a conditional declaration (its own `#[cfg]` or
 /// `#[cfg_attr]`, an enclosing module's, or a conditional `pub use`) is refused, naming it: one
 /// layout must hold for every target. Test modules and unreachable declarations are not considered.
-/// Uninstantiated generic types are excluded. Uses the point scanner's module traversal, including
+/// Uninstantiated generic types are excluded. Uses the module walk the generator uses too, including
 /// explicit module paths.
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
-    let files = crate::source::module_files(krate.into(), lib.into(), dir.into(), true)?;
+    let files = crate::modules::walk_module_files(
+        krate.into(),
+        lib.into(),
+        dir.into(),
+        true,
+        |path, source| syn::parse_file(source).map_err(|e| format!("{}: {e}", path.display())),
+    )?;
     let mut parsed = Vec::new();
     for file in files {
         let source = fs::read_to_string(file.path).map_err(|e| e.to_string())?;

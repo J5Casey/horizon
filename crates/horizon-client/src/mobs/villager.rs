@@ -164,14 +164,18 @@ pub fn start_sleeping(m: &mut Mob, p: [i32; 3], w: &MobWorld, events: &mut Vec<M
         occupied: true,
     });
     m.velocity = horizon_core::geometry::Vec3::ZERO;
-    super::living::teleports::set_pos(m, crate::bed_geometry::pos_to_bed(p, 0.5625));
+    super::living::teleports::set_pos_with(
+        m,
+        crate::bed_geometry::pos_to_bed(p, 0.5625),
+        w.section_writer.clone(),
+    );
     true
 }
 /// `LivingEntity.baseTick`: first-tick `setPosToBed` for a loaded sleeper.
 /// Reuse normal sleep positioning without its motion, memory or bed events.
 pub(super) fn refresh_sleeping_position(m: &mut Mob, w: &MobWorld) {
     if let Some(position) = sleeping_pos(m).and_then(|p| w.sleeping_position(p)) {
-        super::living::teleports::set_pos(m, position);
+        super::living::teleports::set_pos_with(m, position, w.section_writer.clone());
     }
 }
 /// `LivingEntity.stopSleeping`: the bed is no longer `occupied`, and the
@@ -204,10 +208,15 @@ pub fn stop_sleeping(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     let stand = level
         .bed_stand_up(crate::stand_up::StandUpType::VILLAGER, p, forward, m.yaw)
         .unwrap_or_else(|| crate::stand_up::stand_up_fallback(p));
-    set_wake_pose(m, p, stand);
+    set_wake_pose(m, p, stand, w.section_writer.clone());
 }
 /// Rotation part of `LivingEntity.stopSleeping`, after choosing where to stand.
-fn set_wake_pose(m: &mut Mob, bed: [i32; 3], stand: horizon_core::geometry::Vec3) {
+fn set_wake_pose(
+    m: &mut Mob,
+    bed: [i32; 3],
+    stand: horizon_core::geometry::Vec3,
+    observer: Option<super::living::section_writes::Observer>,
+) {
     use horizon_core::geometry::{Vec3, trig};
     let d = Vec3::new(
         f64::from(bed[0]) + 0.5,
@@ -223,7 +232,7 @@ fn set_wake_pose(m: &mut Mob, bed: [i32; 3], stand: horizon_core::geometry::Vec3
     if yaw < -180.0 {
         yaw += 360.0;
     }
-    super::living::teleports::set_pos(m, stand);
+    super::living::teleports::set_pos_with(m, stand, observer);
     m.yaw = yaw as f32;
     m.head_pitch = 0.0;
 }
@@ -1557,7 +1566,7 @@ mod tests {
         m.yaw = -25.0;
         m.head_pitch = 23.0;
         let stand = horizon_core::geometry::Vec3::new(3.5, 200.0, 6.5);
-        set_wake_pose(&mut m, [2, 200, 6], stand);
+        set_wake_pose(&mut m, [2, 200, 6], stand, None);
         // Fresh official 26.3 occupied-bed interaction.
         assert_eq!(m.yaw, 89.99999);
         assert_eq!(m.head_pitch, 0.0);

@@ -274,7 +274,7 @@ impl Ingredient {
                 )
             },
             &resolved_items,
-            &|data| crate::json_nbt::json_to_compound(data).ok(),
+            &components::json_patch,
         );
         let Some(walked) = walked else {
             log::error!("recipes: invalid ingredient (unresolved tag or malformed input): {v}");

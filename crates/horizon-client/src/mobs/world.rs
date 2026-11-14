@@ -977,6 +977,7 @@ fn run_test_world(
         asks_living_destroy_block: false,
         asks_baby_spawn: false,
         border: None,
+        section_writer: None,
     };
     f(&w, types);
     true

@@ -83,6 +83,7 @@ mod abilities;
 mod chat_received;
 use chat_received::QueuedChat;
 pub(in crate::game) mod client_level_tick;
+mod entity_section_steps;
 mod item_use;
 mod remote_attributes;
 mod tables;
@@ -3991,7 +3992,7 @@ impl Game<'_> {
                 ) {
                     t.codec_base = path.end();
                 }
-                self.move_entity(m.id, path, rotation, m.on_ground, MovePacket::Move);
+                self.remote_move_entity_and_file(m.id, path, rotation, m.on_ground);
             }
             C::EntityPositionSync(p) => {
                 let path = match p.path {
@@ -4002,13 +4003,7 @@ impl Game<'_> {
                 if let Some(t) = self.remote.as_mut().and_then(|r| r.entities.get_mut(&p.id)) {
                     t.codec_base = path.end();
                 }
-                self.move_entity(
-                    p.id,
-                    Some(path),
-                    Some((p.yaw, p.pitch)),
-                    p.on_ground,
-                    MovePacket::PositionSync,
-                )
+                self.remote_position_sync_and_file(p.id, path, p.yaw, p.pitch, p.on_ground);
             }
             C::TeleportEntity(p) => {
                 let base = self
@@ -4041,6 +4036,7 @@ impl Game<'_> {
                 if self.driven_mount().is_some_and(|m| m.id as i32 == p.id) {
                     self.remote_move_vehicle(position, p.yaw);
                 }
+                self.entity_section_moved_id(p.id as u32);
             }
             C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, &p.passengers),
             // ClientPacketListener.handleEntityLinkPacket: who holds a mob's
@@ -4071,7 +4067,7 @@ impl Game<'_> {
                     });
                 }
             }
-            C::MoveVehicle(p) => self.remote_move_vehicle(p.position, p.yaw),
+            C::MoveVehicle(p) => self.remote_move_vehicle_and_file(p.position, p.yaw),
             C::MoveMinecartAlongTrack(p) => self.remote_move_minecart(p),
             // ClientPacketListener.handleRotateMob: lerpHeadTo(yHeadRot, 3).
             C::RotateHead(p) => {
@@ -6311,11 +6307,11 @@ impl Game<'_> {
     /// ClientPacketListener.handleMovePlayer.
     fn remote_teleport(&mut self, p: &play::PlayerPosition) -> Result<()> {
         use play::relative as rel;
-        let current = self
+        let (had_player, current) = self
             .player
             .as_ref()
-            .map(|pl| pl.position)
-            .unwrap_or(Vec3::ZERO);
+            .map(|pl| (true, pl.position))
+            .unwrap_or((false, Vec3::ZERO));
         let velocity = self
             .player
             .as_ref()
@@ -6340,8 +6336,7 @@ impl Game<'_> {
             (yaw, pitch),
             p,
         );
-        // BlockStatePredictionHandler.onTeleport: a prediction made before this
-        // one keeps its block but not the player position it remembered.
+        // BlockStatePredictionHandler.onTeleport: a prior prediction keeps its block, not its remembered player position.
         if let Some(r) = self.remote.as_mut() {
             r.last_teleport_sequence = r.sequence;
         }
@@ -6393,6 +6388,7 @@ impl Game<'_> {
                 self.apply_remote_abilities();
             }
         }
+        entity_section_steps::player_teleport(self, had_player, current, position);
         if !self.replay.playing() {
             self.previous_position = position;
         }
@@ -6603,10 +6599,12 @@ impl Game<'_> {
                 .flatten()
             })
             .flatten();
+        let player_from = entity_section_steps::player_before(self);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
         self.native_local_player_size();
         if let Some(player) = player {
@@ -7334,6 +7332,7 @@ impl Game<'_> {
             let players = &r.level_players;
             let tab_players = &r.tab_players;
             let m = &mut self.mobs[i];
+            let section_from = m.position;
             if player {
                 // AvatarRenderer.extractRenderState: isSpectator, from the player list.
                 m.extra.spectator = players
@@ -7544,8 +7543,13 @@ impl Game<'_> {
                 }
                 _ => {}
             }
+            let section_id = m.id;
+            let section_to = m.position;
             if let Some(player) = player_ref {
                 self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
+            }
+            if section_from != section_to {
+                self.remote_entity_section_step(section_id, section_from, section_to);
             }
         }
         // ExperienceOrb.tick runs on a client too (all but the merges and the
@@ -7624,16 +7628,7 @@ impl Game<'_> {
             .retain(|_, (_, steps)| *steps > 0);
         let mut entered = Vec::new();
         if running {
-            let mut items = self.dropped.lift();
-            items.retain_mut(|item| {
-                // The server decides entity collisions. This copy predicts block movement.
-                let (_, discarded) =
-                    self.tick_item_with_block_contacts(item, None, &[], true, &mut |splash| {
-                        entered.push(splash);
-                    });
-                !discarded
-            });
-            self.put_back_dropped(items);
+            entity_section_steps::tick_items(self, &mut entered);
         }
         // Entity.doWaterSplashEffect on this window: Level.addParticle draws
         // the bubbles and splashes. ClientLevel.playSeededSound drops

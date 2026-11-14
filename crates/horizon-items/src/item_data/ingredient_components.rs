@@ -40,6 +40,38 @@ pub fn removed(stack: &ItemStack, id: &str) -> bool {
 /// Presence is checked by the caller, so empty decoded enchantment maps compare equal.
 pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
     match id {
+        "minecraft:cooking_fuel" => super::cooking_fuel::equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
+        "minecraft:brewing_fuel" => super::brewing_fuel::equal(
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ),
+        "minecraft:compostable" => {
+            let a = a
+                .data()
+                .and_then(|d| d.other(id))
+                .and_then(|t| compostable_layers(t).ok());
+            let b = b
+                .data()
+                .and_then(|d| d.other(id))
+                .and_then(|t| compostable_layers(t).ok());
+            matches!((a,b),(Some(a),Some(b)) if a==b)
+        }
+
+        "minecraft:weapon" => {
+            let weapon = |stack: &ItemStack| {
+                stack
+                    .data()
+                    .and_then(|data| data.other(id))
+                    .and_then(|tag| crate::properties::Weapon::from_tag(tag).ok())
+            };
+            match (weapon(a), weapon(b)) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            }
+        }
         "minecraft:damage" => a.damage == b.damage,
         "minecraft:map_id" => map_id(a) == map_id(b),
         "minecraft:repair_cost" => {
@@ -58,6 +90,13 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().and_then(|d| d.other(id)).and_then(component_bool)
                 == b.data().and_then(|d| d.other(id)).and_then(component_bool)
         }
+        "minecraft:food" => match (
+            a.data().and_then(|d| d.other(id)).map(food_properties),
+            b.data().and_then(|d| d.other(id)).map(food_properties),
+        ) {
+            (Some(Ok(a)), Some(Ok(b))) => a == b,
+            _ => false,
+        },
         "minecraft:custom_name" => {
             a.data().and_then(|d| d.custom_name.as_ref())
                 == b.data().and_then(|d| d.custom_name.as_ref())
@@ -118,6 +157,25 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
             a.data().and_then(|d| d.other(id)),
             b.data().and_then(|d| d.other(id)),
         ),
+        "minecraft:use_cooldown" => {
+            fn fields(stack: &ItemStack) -> Option<(f32, Option<&Tag>)> {
+                stack
+                    .data()
+                    .and_then(|d| d.other("minecraft:use_cooldown"))
+                    .and_then(crate::cooldowns::UseCooldown::fields_from_tag)
+            }
+            match (fields(a), fields(b)) {
+                (Some((a, ga)), Some((b, gb))) => {
+                    a.to_bits() == b.to_bits()
+                        && match (ga, gb) {
+                            (None, None) => true,
+                            (Some(a), Some(b)) => identifier_equal(Some(a), Some(b)),
+                            _ => false,
+                        }
+                }
+                _ => false,
+            }
+        }
         "minecraft:rarity" => rarity(a) == rarity(b),
         "minecraft:ominous_bottle_amplifier" => ominous_amplifier(a) == ominous_amplifier(b),
         // DyeColor.CODEC's canonical NbtOps value is its exact serialized name.
@@ -148,6 +206,28 @@ fn dyed_color(stack: &ItemStack) -> Option<i32> {
         Some(raw) => horizon_core::color::rgb_color_from_tag(raw),
         None => data.dyed_color,
     }
+}
+
+/// `Compostable.CODEC` / `ResolvableInt.CODEC`: required layers, either any Java
+/// int or a resource key. References are keys, not registry lookups.
+fn compostable_layers(value: &Tag) -> Result<crate::properties::resolvable::Int<'_>, &'static str> {
+    if !matches!(value, Tag::Compound(_)) {
+        return Err("Not a map");
+    }
+    let layers = value.get("layers").ok_or("Missing layers")?;
+    crate::properties::resolvable::int(layers)
+        .ok_or("layers: expected a number or resource location")
+}
+
+/// Validate without materializing a normalized payload.
+pub fn validate_compostable(value: &Tag) -> Result<(), String> {
+    compostable_layers(value).map(|_| ()).map_err(str::to_owned)
+}
+
+/// Normalize only the persistent codec fields; unknown record fields are ignored.
+pub fn decoded_compostable(value: &Tag) -> Result<Tag, String> {
+    let layers = compostable_layers(value).map_err(str::to_owned)?.to_tag();
+    Ok(Tag::compound([("layers", layers)]))
 }
 
 /// Exact stored-value comparison, including the fields removed from `other` by decoding.

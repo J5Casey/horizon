@@ -184,41 +184,100 @@ impl ComponentPredicate {
     }
 }
 
+/// JSON optional record fields treat null as absent before the strict NBT boundary.
+pub(super) fn json_patch(data: &serde_json::Map<String, Value>) -> Option<Compound> {
+    let mut normalized = None;
+    for (id, value) in data {
+        let component = id.strip_prefix("minecraft:").unwrap_or(id);
+        let optional: &[&str] = match component {
+            "weapon" => &["item_damage_per_attack", "disable_blocking_for_seconds"],
+            "food" => &["can_always_eat"],
+            "use_cooldown" => &["cooldown_group"],
+            _ => &[],
+        };
+        if let Some(record) = value.as_object() {
+            // Integral JSON-to-NBT conversion would discard weapon's forbidden sign.
+            if component == "weapon"
+                && record
+                    .get("disable_blocking_for_seconds")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|seconds| seconds == 0.0 && seconds.is_sign_negative())
+            {
+                return None;
+            }
+            let mut normalized_record = None;
+            for field in optional {
+                if record.get(*field).is_some_and(Value::is_null) {
+                    normalized_record
+                        .get_or_insert_with(|| record.clone())
+                        .remove(*field);
+                }
+            }
+            if let Some(record) = normalized_record {
+                normalized
+                    .get_or_insert_with(|| data.clone())
+                    .insert(id.clone(), Value::Object(record));
+            }
+        }
+    }
+    crate::json_nbt::json_to_compound(normalized.as_ref().unwrap_or(data)).ok()
+}
+
+// Keep conversion failures alongside codec errors at the recipe publication boundary.
+pub(super) fn validate_recipe_components(value: &Value, items: &Items) -> Result<(), String> {
+    let object = value.as_object().ok_or("malformed components ingredient")?;
+    let keys = object
+        .get("components")
+        .and_then(Value::as_object)
+        .map(|patch| {
+            patch
+                .keys()
+                .map(|id| id.strip_prefix('!').unwrap_or(id).to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let ids = IngredientRule::Components {
+        patch: Default::default(),
+        removed: keys,
+        strict: false,
+    };
+    validate(&ids, items)?;
+    let conversion_error = std::cell::RefCell::new(None);
+    let parsed = WalkedIngredient::walk(
+        value,
+        &items.item_tag_order,
+        &|_| None,
+        &resolved_items,
+        &|data| {
+            let mut converted = horizon_core::nbt::Compound::new();
+            for (id, value) in data {
+                let single = serde_json::Map::from_iter([(id.clone(), value.clone())]);
+                match json_patch(&single) {
+                    Some(field) => converted.extend(field),
+                    None => {
+                        *conversion_error.borrow_mut() =
+                            Some(format!("component {id}: malformed JSON payload"));
+                        return None;
+                    }
+                }
+            }
+            Some(converted)
+        },
+    );
+    if let Some(error) = conversion_error.into_inner() {
+        return Err(error);
+    }
+    let rule = parsed
+        .and_then(|parsed| parsed.rule)
+        .ok_or_else(|| "malformed components ingredient".to_owned())?;
+    validate(&rule, items)
+}
+
 pub(super) fn validate_recipe(value: &Value, items: &Items, recipe: &str) -> bool {
     match value {
         Value::Object(object) => match ingredient_kind(object) {
             Some("neoforge:components") => {
-                let keys = object
-                    .get("components")
-                    .and_then(Value::as_object)
-                    .map(|patch| {
-                        patch
-                            .keys()
-                            .map(|id| id.strip_prefix('!').unwrap_or(id).to_owned())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let ids = IngredientRule::Components {
-                    patch: Default::default(),
-                    removed: keys,
-                    strict: false,
-                };
-                if let Err(error) = validate(&ids, items) {
-                    log::warn!("recipe {recipe} rejected: {error}");
-                    return false;
-                }
-                let parsed = WalkedIngredient::walk(
-                    value,
-                    &items.item_tag_order,
-                    &|_| None,
-                    &resolved_items,
-                    &|data| crate::json_nbt::json_to_compound(data).ok(),
-                );
-                let result = parsed
-                    .and_then(|parsed| parsed.rule)
-                    .ok_or_else(|| "malformed components ingredient".to_owned())
-                    .and_then(|rule| validate(&rule, items));
-                if let Err(error) = result {
+                if let Err(error) = validate_recipe_components(value, items) {
                     log::warn!("recipe {recipe} rejected: {error}");
                     return false;
                 }

@@ -6,6 +6,7 @@ horizon-client game::commands::modprofile::tests::modprofile_state_and_report_si
 horizon-client game::commands::selector_bounds_tests::actual_selector_uses_body_overlap_but_distance_stays_at_the_origin lib daily game-boot
 horizon-client game::commands::world_cmds::allay_owner_damage_tests::allay_owner_adapters_compare_the_actual_player_uuid lib daily game-boot
 horizon-client game::dedicated::tests::console_logging_survives_closed_stdout lib daily child-process
+horizon-client game::entity_sections::tests::a_real_mob_tick_tells_inside_each_position_write lib daily resources
 horizon-client game::explosion_detonate::tests::a_nested_blast_keeps_its_own_spared lib daily game-boot
 horizon-client game::explosion_detonate::tests::a_position_taken_out_keeps_its_block lib daily game-boot
 horizon-client game::explosion_detonate::tests::an_added_entity_is_hurt_and_an_empty_handle_is_refused lib daily game-boot

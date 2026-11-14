@@ -24,13 +24,20 @@ fn int_of(t: &Tag) -> Option<i64> {
 }
 /// Built-ins with an implemented shared component payload decoder.
 pub const DECODED_COMPONENTS: &[&str] = &[
+    "minecraft:dye",
+    "minecraft:use_cooldown",
+    "minecraft:cooking_fuel",
+    "minecraft:brewing_fuel",
+    "minecraft:compostable",
+    "minecraft:fox/variant",
+    "minecraft:weapon",
+    "minecraft:food",
     "minecraft:damage",
     "minecraft:repair_cost",
     "minecraft:max_damage",
     "minecraft:max_stack_size",
     "minecraft:map_id",
     "minecraft:rarity",
-    "minecraft:dye",
     "minecraft:enchantments",
     "minecraft:stored_enchantments",
     "minecraft:enchantment_glint_override",
@@ -57,6 +64,31 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
     }
     if id == "minecraft:item_model" {
         return item_model(value);
+    }
+    if id == "minecraft:food" {
+        let food = horizon_items::item_data::food_properties(value).map_err(str::to_owned)?;
+        return Ok(Tag::compound([
+            ("nutrition", Tag::Int(food.nutrition)),
+            ("saturation", Tag::Float(food.saturation.to_bits())),
+            ("can_always_eat", Tag::Byte(i8::from(food.can_always_eat))),
+        ]));
+    }
+    if id == "minecraft:weapon" {
+        return horizon_items::properties::Weapon::from_tag(value)
+            .map(|weapon| weapon.to_tag())
+            .map_err(str::to_owned);
+    }
+    if id == "minecraft:compostable" {
+        return horizon_items::item_data::ingredient_components::decoded_compostable(value);
+    }
+    if id == "minecraft:brewing_fuel" {
+        return horizon_items::item_data::brewing_fuel::decode(value);
+    }
+    if id == "minecraft:cooking_fuel" {
+        return horizon_items::item_data::cooking_fuel::decode(value);
+    }
+    if id == "minecraft:use_cooldown" {
+        return use_cooldown(value);
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -120,6 +152,35 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
 /// The codecs of the item components commands commonly set.
 pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), String> {
     match id {
+        // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
+        // exact names, not the ordinal codec selected by compressMaps().
+        "minecraft:dye" => match t {
+            Tag::String(name) => {
+                if horizon_items::firework::DYE_FIREWORK_COLORS
+                    .iter()
+                    .any(|(color, _)| name.0.iter().copied().eq(color.encode_utf16()))
+                {
+                    Ok(())
+                } else {
+                    Err(format!("Unknown element name:{}", name.to_string_lossy()))
+                }
+            }
+            _ => Err("Not a string".into()),
+        },
+
+        "minecraft:use_cooldown" => use_cooldown(t).map(|_| ()),
+        "minecraft:cooking_fuel" => horizon_items::item_data::cooking_fuel::decode(t).map(|_| ()),
+        "minecraft:brewing_fuel" => horizon_items::item_data::brewing_fuel::decode(t).map(|_| ()),
+        "minecraft:compostable" => {
+            horizon_items::item_data::ingredient_components::validate_compostable(t)
+        }
+        "minecraft:fox/variant" => string_enum(t, &["red", "snow"]),
+        "minecraft:weapon" => horizon_items::properties::Weapon::from_tag(t)
+            .map(|_| ())
+            .map_err(str::to_owned),
+        "minecraft:food" => horizon_items::item_data::food_properties(t)
+            .map(|_| ())
+            .map_err(str::to_owned),
         // MapId.CODEC is Codec.INT, without a non-negative constraint.
         "minecraft:map_id" => int_of(t).map(|_| ()).ok_or_else(|| "Not a number".into()),
         "minecraft:dyed_color" => horizon_core::color::rgb_color_from_tag(t)
@@ -181,32 +242,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             }
             Ok(())
         }
-        "minecraft:rarity" => match t {
-            Tag::String(s) => {
-                let s = s.to_string_lossy();
-                if ["common", "uncommon", "rare", "epic"].contains(&s.as_str()) {
-                    Ok(())
-                } else {
-                    Err(format!("Unknown element name:{s}"))
-                }
-            }
-            _ => Err("Not a string".into()),
-        },
-        // DyeColor.CODEC -> StringRepresentable.fromEnum: ordinary NbtOps uses
-        // exact names, not the ordinal codec selected by compressMaps().
-        "minecraft:dye" => match t {
-            Tag::String(name) => {
-                if horizon_items::firework::DYE_FIREWORK_COLORS
-                    .iter()
-                    .any(|(color, _)| name.0.iter().copied().eq(color.encode_utf16()))
-                {
-                    Ok(())
-                } else {
-                    Err(format!("Unknown element name:{}", name.to_string_lossy()))
-                }
-            }
-            _ => Err("Not a string".into()),
-        },
+        "minecraft:rarity" => string_enum(t, &["common", "uncommon", "rare", "epic"]),
         "minecraft:enchantments" | "minecraft:stored_enchantments" => enchantment_map(t, reg),
         // DataComponents.ENCHANTMENT_GLINT_OVERRIDE: Codec.BOOL through NbtOps.
         "minecraft:enchantment_glint_override" => horizon_items::item_data::component_bool(t)
@@ -272,6 +308,35 @@ fn item_model(value: &Tag) -> Result<Tag, String> {
 }
 /// `ItemEnchantments.CODEC`: registry keys and boxed-number levels in 1..=255.
 /// `UnboundedMapCodec` reports failed entries; commands do not retain its partial map.
+fn string_enum(t: &Tag, names: &[&str]) -> Result<(), String> {
+    let Tag::String(value) = t else {
+        return Err("Not a string".into());
+    };
+    if names
+        .iter()
+        .any(|name| value.0.iter().copied().eq(name.encode_utf16()))
+    {
+        Ok(())
+    } else {
+        Err(format!("Unknown element name:{}", value.to_string_lossy()))
+    }
+}
+fn use_cooldown(value: &Tag) -> Result<Tag, String> {
+    let Tag::Compound(_) = value else {
+        return Err(not_map(value));
+    };
+    let (seconds, group) = horizon_items::cooldowns::UseCooldown::fields_from_tag(value)
+        .ok_or("Expected numeric 'seconds' field")?;
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return Err(format!("Value must be positive: {seconds}"));
+    }
+    let mut record = Compound::new();
+    record.insert("seconds".into(), Tag::Float(seconds.to_bits()));
+    if let Some(group) = group {
+        record.insert("cooldown_group".into(), item_model(group)?);
+    }
+    Ok(Tag::Compound(record))
+}
 fn enchantment_map(t: &Tag, reg: &Registries) -> Result<(), String> {
     let Tag::Compound(map) = t else {
         return Err(not_map(t));
@@ -855,25 +920,6 @@ pub fn suggest_predicate(builder: &mut SuggestionsBuilder, reg: &Registries) {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_component;
-
-    #[test]
-    fn dye_codec_rejects_non_names_without_lossy_utf16_conversion() {
-        use super::{Registries, Tag, decoded_component_value};
-        use horizon_core::nbt::JavaString;
-        let registry = Registries::default();
-        for value in [
-            Tag::End,
-            Tag::ByteArray(vec![]),
-            Tag::IntArray(vec![]),
-            Tag::LongArray(vec![]),
-            Tag::String(JavaString(vec![0xd800])),
-            Tag::String(JavaString(vec![114, 101, 100, 0xd800])),
-        ] {
-            assert!(decoded_component_value("minecraft:dye", &value, &registry).is_err());
-        }
-    }
-
     #[test]
     fn dye_codec_accepts_only_exact_names_under_ordinary_nbt_ops() {
         use super::{Registries, Tag, decoded_component_value};
@@ -932,6 +978,139 @@ mod tests {
         // dye ordinals are not persistent NbtOps names.
         for ordinal in -1..=16 {
             assert!(decode_component("minecraft:dye", &Tag::Int(ordinal), &registry).is_err());
+        }
+    }
+
+    #[test]
+    fn dye_codec_rejects_non_names_without_lossy_utf16_conversion() {
+        use super::{Registries, Tag, decoded_component_value};
+        use horizon_core::nbt::JavaString;
+        let registry = Registries::default();
+        for value in [
+            Tag::End,
+            Tag::ByteArray(vec![]),
+            Tag::IntArray(vec![]),
+            Tag::LongArray(vec![]),
+            Tag::String(JavaString(vec![0xd800])),
+            Tag::String(JavaString(vec![114, 101, 100, 0xd800])),
+        ] {
+            assert!(decoded_component_value("minecraft:dye", &value, &registry).is_err());
+        }
+    }
+
+    #[test]
+    fn weapon_codec_defaults_numeric_conversions_and_ranges() {
+        use super::{Registries, Tag, decoded_component_value};
+        let registry = Registries::default();
+        let decode = |tag: &Tag| decoded_component_value("minecraft:weapon", tag, &registry);
+        let canonical = |damage, seconds: f32| {
+            Tag::compound([
+                ("item_damage_per_attack", Tag::Int(damage)),
+                (
+                    "disable_blocking_for_seconds",
+                    Tag::Float(seconds.to_bits()),
+                ),
+            ])
+        };
+        assert_eq!(
+            decode(&Tag::Compound(Default::default())).unwrap(),
+            canonical(1, 0.0)
+        );
+        for (number, expected) in [
+            (Tag::Byte(2), 2),
+            (Tag::Short(2), 2),
+            (Tag::Long(4_294_967_298), 2),
+            (Tag::Double(2.75f64.to_bits()), 2),
+            (Tag::Float(f32::NAN.to_bits()), 0),
+            (Tag::Double(f64::INFINITY.to_bits()), i32::MAX),
+        ] {
+            assert_eq!(
+                decode(&Tag::compound([
+                    ("item_damage_per_attack", number),
+                    (
+                        "disable_blocking_for_seconds",
+                        Tag::Double(1.25f64.to_bits())
+                    ),
+                    ("ignored", Tag::String("anything".into())),
+                ]))
+                .unwrap(),
+                canonical(expected, 1.25)
+            );
+        }
+        for number in [
+            Tag::Byte(-1),
+            Tag::Long(2_147_483_648),
+            Tag::String("1".into()),
+        ] {
+            assert!(decode(&Tag::compound([("item_damage_per_attack", number)])).is_err());
+        }
+        for number in [
+            Tag::Float((-0.0f32).to_bits()),
+            Tag::Float((-1.0f32).to_bits()),
+            Tag::Float(f32::NAN.to_bits()),
+            Tag::Float(f32::INFINITY.to_bits()),
+            Tag::Float(f32::NEG_INFINITY.to_bits()),
+            Tag::Double(f64::MAX.to_bits()),
+            Tag::String("0".into()),
+        ] {
+            assert!(decode(&Tag::compound([("disable_blocking_for_seconds", number)])).is_err());
+        }
+        assert_eq!(
+            decode(&Tag::compound([(
+                "disable_blocking_for_seconds",
+                Tag::Float(f32::MAX.to_bits()),
+            )]))
+            .unwrap(),
+            canonical(1, f32::MAX)
+        );
+        assert!(decode(&Tag::List(Vec::new())).is_err());
+    }
+
+    use super::decode_component;
+
+    #[test]
+    fn fox_variant_codec_accepts_only_exact_persistent_names() {
+        use super::{Registries, Tag, decoded_component_value};
+        use horizon_core::nbt::JavaString;
+        let registry = Registries::default();
+        for name in ["red", "snow"] {
+            let value = Tag::String(name.into());
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Ok(value)
+            );
+        }
+        for value in [
+            Tag::Byte(0),
+            Tag::Int(1),
+            Tag::Double(1.0f64.to_bits()),
+            Tag::List(vec![]),
+            Tag::compound([] as [(&str, Tag); 0]),
+        ] {
+            assert_eq!(
+                decoded_component_value("minecraft:fox/variant", &value, &registry),
+                Err("Not a string".into())
+            );
+        }
+        for name in ["", "RED", "Snow", "minecraft:red", "arctic", "red "] {
+            assert_eq!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(name.into()),
+                    &registry
+                ),
+                Err(format!("Unknown element name:{name}"))
+            );
+        }
+        for units in [vec![0xd800], vec![114, 101, 100, 0xdc00]] {
+            assert!(
+                decoded_component_value(
+                    "minecraft:fox/variant",
+                    &Tag::String(JavaString(units)),
+                    &registry
+                )
+                .is_err()
+            );
         }
     }
 

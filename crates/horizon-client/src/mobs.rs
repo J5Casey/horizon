@@ -3325,7 +3325,6 @@ pub trait LiveMobs {
     /// Visit each mob in the disjoint loan, without allocating a snapshot.
     fn for_each(&self, visitor: &mut dyn FnMut(&Mob));
 }
-
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     pub professions: &'a villager::ResolvedProfessions,
@@ -3439,6 +3438,7 @@ pub struct MobWorld<'a> {
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
+    pub section_writer: Option<living::section_writes::Observer>,
 }
 /// `MobEffectInstance.tickServer` for a content mod's effect: its
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's
