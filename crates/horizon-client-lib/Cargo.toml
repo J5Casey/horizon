@@ -9,12 +9,16 @@ license.workspace = true
 rust-version.workspace = true
 description = "Reusable client systems, control tool and parity probes"
 
+[build-dependencies]
+horizon-game-discovery = { path = "../horizon-game-discovery" }
+
 [lib]
 path = "../horizon-client/src/client_lib.rs"
 
 [dependencies]
 horizon-guest-stack = { path = "../horizon-guest-stack" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
+horizon-engine-slots = { path = "../horizon-engine-slots" }
 horizon-hooks = { path = "../horizon-hooks" }
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab" }
@@ -149,6 +153,7 @@ horizon-threads = { path = "../horizon-threads", features = ["test-allocation-pr
 horizon-mod-wasm = { path = "../horizon-mod-wasm", features = ["listener-fixture", "test-copy-probe"] }
 tempfile = "3"
 mod_platform = { package = "horizon-mod-api", path = "../horizon-mod-api", features = ["testing"] }
+mod_api = { package = "horizon-mod-vocab", path = "../horizon-mod-vocab", features = ["testing"] }
 # ui_theme's unit tests draw text in the design system's fonts.
 horizon-theme = { path = "../horizon-theme" }
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }

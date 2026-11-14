@@ -32,6 +32,13 @@ const CLASSIC_BUTTON: f32 = 20.0;
 /// Items a panel may hold.
 const ITEMS: usize = 8192;
 
+/// The browser's overlay selected while painting its contents.
+pub(super) enum BrowserTooltip {
+    Text(String),
+    Stack(ItemStack),
+    Fluid(mod_api::FluidStack),
+}
+
 /// Whose panel it is: a native mod's id.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Owner {
@@ -250,8 +257,14 @@ fn classic_layout(
     let list_width = grid_width.max(4.0 * CLASSIC_BUTTON);
     let list_x = right - list_width;
     let x = list_x + ((list_width - grid_width) / 2.0).floor();
-    let foot = height - CLASSIC_PAD - CLASSIC_BUTTON;
     let centred = centred && window[1] + window[3] + CLASSIC_BUTTON < height;
+    let foot = height
+        - CLASSIC_BUTTON
+        - if centred {
+            CLASSIC_PAD
+        } else {
+            2.0 * CLASSIC_PAD
+        };
     let (search_x, search_width) = if centred {
         (window[0], window[2])
     } else {
@@ -623,15 +636,11 @@ impl Game<'_> {
             );
         }
     }
-    /// Draws the panel over the open container screen, then the carried
-    /// stack or the tooltip again so they stay on top of it.
-    pub(super) fn draw_mod_browser(&mut self, batch: &mut HudBatch) {
-        if self.browser_sync().is_none() {
-            return;
-        }
-        let Some(layout) = self.browser_layout(batch) else {
-            return;
-        };
+    /// Draw the browser's contents once, leaving its tooltip for the screen's
+    /// overlay phase. The carried stack belongs to the enclosing screen.
+    pub(super) fn draw_mod_browser(&mut self, batch: &mut HudBatch) -> Option<BrowserTooltip> {
+        self.browser_sync()?;
+        let layout = self.browser_layout(batch)?;
         let cursor = self.cursor;
         if self.panel.recipes.is_some() {
             self.draw_browser_recipes(batch, &layout);
@@ -649,14 +658,16 @@ impl Game<'_> {
         let search = self.browser_search(&layout);
         // The hint shows in an empty box without focus, as the recipe book's.
         search.suggestion = (search.value.is_empty() && !search.focused).then_some(hint);
-        if layout.classic {
-            // JEI's search text: white, red when nothing matches.
-            search.text_color = if nothing_found && !search.value.is_empty() {
+        // Reset every frame, including when leaving the classic style.
+        search.text_color = if layout.classic {
+            if nothing_found && !search.value.is_empty() {
                 rgba(255, 0, 0, 255)
             } else {
                 rgba(255, 255, 255, 255)
-            };
-        }
+            }
+        } else {
+            rgba(224, 224, 224, 255)
+        };
         let mut search = search.clone();
         search.draw_with_skin(batch, &self.gui.atlas, None, skin);
         self.panel.search = Some(search);
@@ -671,8 +682,8 @@ impl Game<'_> {
                     "horizon/jei/button_enabled_v2"
                 };
                 horizon_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
-                let (icon, tint) = ("horizon/jei/icons/config_button", icon_tint(true, hovered));
-                batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, tint);
+                let icon = "horizon/jei/icons/config_button";
+                batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, u32::MAX);
             } else {
                 let sprite = if hovered {
                     "gui/sprites/widget/button_highlighted"
@@ -693,18 +704,34 @@ impl Game<'_> {
             let label = horizon_client::lang::get("options.title");
             horizon_client::widgets::record(&label, rect, true);
             if hovered && self.carried.is_none() {
-                self.draw_tooltip_lines(batch, &[(label, u32::MAX)], cursor.0, cursor.1);
-                return;
+                return Some(BrowserTooltip::Text(label));
             }
         }
         if self.carried.is_some() {
-            self.draw_carried(batch);
+            None
         } else if let Some(stack) = self.browser_pointed_stack(&layout) {
-            self.draw_stack_tooltip(batch, &stack.1, cursor.0, cursor.1);
-        } else if let Some(fluid) = self.recipe_fluid_hovered(&layout) {
-            self.draw_fluid_tooltip(batch, &fluid, cursor.0, cursor.1);
+            Some(BrowserTooltip::Stack(stack.1))
         } else {
-            self.draw_slot_tooltip(batch);
+            self.recipe_fluid_hovered(&layout)
+                .map(BrowserTooltip::Fluid)
+        }
+    }
+
+    pub(super) fn draw_mod_browser_tooltip(
+        &mut self,
+        batch: &mut HudBatch,
+        tooltip: BrowserTooltip,
+    ) {
+        match tooltip {
+            BrowserTooltip::Text(text) => {
+                self.draw_tooltip_lines(batch, &[(text, u32::MAX)], self.cursor.0, self.cursor.1);
+            }
+            BrowserTooltip::Stack(stack) => {
+                self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
+            }
+            BrowserTooltip::Fluid(fluid) => {
+                self.draw_fluid_tooltip(batch, &fluid, self.cursor.0, self.cursor.1);
+            }
         }
     }
 
@@ -1062,9 +1089,9 @@ mod tests {
 
         // Under the items, with the rows above it.
         let beside = super::classic_layout(screen, window, 0.0, false).unwrap();
-        assert_eq!(beside.search, [388.0, 451.0, 161.0, 20.0]);
-        assert_eq!(beside.settings, Some([548.0, 451.0, 20.0, 20.0]));
-        assert_eq!((beside.rows, beside.grid.1), (23, 28.0));
+        assert_eq!(beside.search, [388.0, 449.0, 161.0, 20.0]);
+        assert_eq!(beside.settings, Some([548.0, 449.0, 20.0, 20.0]));
+        assert_eq!((beside.rows, beside.grid.1), (23, 27.0));
 
         // A window reaching the foot keeps the search box under the items.
         let tall = super::classic_layout(screen, [197.0, 153.0, 176.0, 310.0], 0.0, true).unwrap();
@@ -1079,8 +1106,11 @@ mod tests {
         assert_eq!(few.browser_arrow_rects(true)[1], [278.0, 2.0, 20.0, 20.0]);
         // The area covers the first column's left pixels (x 231 to 239).
         assert!(few.area[0] <= few.grid.0);
-        assert!(super::inside((few.grid.0 + 1.0, few.grid.1 + 1.0), few.area));
-        assert_eq!(few.search, [218.0, 451.0, 61.0, 20.0]);
+        assert!(super::inside(
+            (few.grid.0 + 1.0, few.grid.1 + 1.0),
+            few.area
+        ));
+        assert_eq!(few.search, [218.0, 449.0, 61.0, 20.0]);
         // No room for two columns: no panel.
         let narrow = [37.0, 17.0, 176.0, 166.0];
         assert!(super::classic_layout([250.0, 200.0], narrow, 0.0, true).is_none());

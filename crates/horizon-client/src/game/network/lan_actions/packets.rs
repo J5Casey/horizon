@@ -661,6 +661,8 @@ impl Game<'_> {
                 });
             }
             S::PlayerCommand(p) if p.action == 6 => self.lan_start_gliding(conn),
+            // STOP_SLEEPING: `stopSleepInBed(false, true)`.
+            S::PlayerCommand(p) if p.action == 0 => self.wake_guest(gi, false, true),
             // START_RIDING_JUMP: the mount's handleStartJump.
             S::PlayerCommand(p) if p.action == 3 => {
                 self.lan_start_riding_jump(conn, p.data);

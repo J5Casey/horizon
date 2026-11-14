@@ -2427,9 +2427,10 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+mod installation;
 /// Installs `binary` as version `version`, retaining the base's runtime helpers. Clients
 /// reference the base's prepared resources; standalone server exports still carry their own.
-mod installation;
+mod library_record;
 use installation::install;
 
 /// Copies version folder `from` into `to` but for what a new build of `target` makes its own

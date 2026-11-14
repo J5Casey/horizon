@@ -998,7 +998,7 @@ struct Game<'a> {
     damage_tag_generation: u64,
     /// The registries native mods registered data map types for, as of the
     /// server tables' last build: what `data_maps_updated` fires for.
-    data_map_registries: Vec<&'static str>,
+    data_map_registries: Vec<String>,
     /// This game's resource packs (`reload_packs` replaces them).
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
@@ -4876,7 +4876,7 @@ impl Game<'_> {
             }
             // The early return skips the match below: the hooks still see the
             // screen, after its own drawing.
-            self.draw_screen_with_post_hook(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch);
             return batch;
         }
         if self.screen == Screen::Options {
@@ -4887,8 +4887,10 @@ impl Game<'_> {
             let drawn = self.draw_screen_with_pre_hook(&mut batch);
             if drawn {
                 self.draw_options(&mut batch);
+            } else {
+                self.ui.options.discard_draw();
             }
-            self.draw_screen_with_post_hook(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch);
             self.draw_split_hud(&mut batch, true);
             return batch;
         }
@@ -4917,7 +4919,7 @@ impl Game<'_> {
             if drawn {
                 self.draw_debug_options(&mut batch);
             }
-            self.draw_screen_with_post_hook(&mut batch, drawn);
+            self.draw_screen_with_post_hook(&mut batch);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -4937,12 +4939,13 @@ impl Game<'_> {
                     self.cursor,
                     self.settings.file.bool("hideSplashTexts"),
                     self.settings.file.bool("hideServerAddress"),
+                    &mut |phase, batch| self.draw_screen_phase(batch, phase),
                 );
             }
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
             // over them here (a pack browser over Create New World, say), and the
             // toasts still come after, as over any screen.
-            self.draw_title_screen_with_post_hook(&mut batch, drawn);
+            self.draw_title_screen_with_post_hook(&mut batch);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -5221,7 +5224,6 @@ impl Game<'_> {
         if self.screen == Screen::Chat {
             // The mod layers under the chat stay under the focused chat.
             self.draw_mod_gui_layers(Some("minecraft:chat"), &mut batch);
-            self.draw_chat(&mut batch);
         } else if show_hud {
             if !self.overlay_holds_view() {
                 self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
@@ -5249,6 +5251,10 @@ impl Game<'_> {
             Screen::Paused if self.pause_menu => self.draw_pause_menu(&mut batch),
             // PauseScreen(false): only its title, at the top.
             Screen::Paused => {
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Background,
+                );
                 let title = self.translate_with_fallback("menu.paused", "Game Paused");
                 horizon_client::widgets::begin_screen(|| {
                     horizon_client::widgets::ScreenInfo::new("paused", title.clone())
@@ -5262,13 +5268,26 @@ impl Game<'_> {
                     u32::MAX,
                     true,
                 );
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Foreground,
+                );
             }
             Screen::GameModeSwitcher => self.draw_gamemode_switcher(&mut batch),
             Screen::EmoteWheel => self.draw_emote_wheel(&mut batch),
             Screen::Dead => self.draw_death_screen(&mut batch),
             Screen::Stats => self.draw_stats(&mut batch),
             Screen::Advancements => self.draw_advancements(&mut batch),
-            Screen::Mod => {}
+            Screen::Mod => {
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Background,
+                );
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Foreground,
+                );
+            }
             Screen::WorldOptions => self.draw_world_options(&mut batch),
             Screen::Friends => self.draw_friends_screen(&mut batch),
             Screen::Social => self.draw_social_screen(&mut batch),
@@ -5279,17 +5298,24 @@ impl Game<'_> {
             Screen::BlockEditor => self.draw_block_editor(&mut batch),
             Screen::DebugOptions => self.draw_debug_options(&mut batch),
             Screen::HudEditor => self.draw_hud_editor(&mut batch),
-            Screen::Studio => {}
+            Screen::Studio => {
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Background,
+                );
+                self.draw_screen_phase(
+                    &mut batch,
+                    horizon_client::screen_draw::RenderPhase::Foreground,
+                );
+            }
             Screen::Inventory => {
                 let from = batch.vertices.len();
                 self.draw_inventory(&mut batch);
-                self.draw_mod_browser(&mut batch);
                 self.draw_pad_menu_guide(&mut batch, from);
             }
             Screen::Creative => {
                 let from = batch.vertices.len();
                 self.draw_creative(&mut batch);
-                self.draw_mod_browser(&mut batch);
                 self.draw_pad_menu_guide(&mut batch, from);
             }
             Screen::Chat => self.draw_chat_screen(&mut batch),
@@ -5299,7 +5325,7 @@ impl Game<'_> {
         // tooltips, so a native mod draws over it here. Never `Playing`: the
         // prompts, books and sign editors drawn over gameplay keep it, draw
         // after this point and so over what a mod drew.
-        self.draw_screen_with_post_hook(&mut batch, drawn);
+        self.draw_screen_with_post_hook(&mut batch);
         self.draw_saving_indicator(&mut batch);
         self.draw_every_toast(&mut batch, !show_hud);
         if self.server_packs.prompt.is_none() {
@@ -5314,179 +5340,6 @@ impl Game<'_> {
         batch
     }
 
-    fn draw_inventory(&mut self, batch: &mut HudBatch) {
-        screen_info::begin_container("container");
-        if self.draw_station(batch) {
-            return;
-        }
-        let (ox, oy) = self.inventory_origin(batch);
-        {
-            let atlas = &self.gui.atlas;
-            self.render_transparent_background("inventory", batch);
-            let part = |batch: &mut HudBatch,
-                        name: &str,
-                        sx: f32,
-                        sy: f32,
-                        w: f32,
-                        h: f32,
-                        dx: f32,
-                        dy: f32| {
-                if let Some(mut r) = atlas.sprites.get(name).copied() {
-                    let (du, dv) = ((r.u1 - r.u0) / r.w as f32, (r.v1 - r.v0) / r.h as f32);
-                    r.u0 += sx * du;
-                    r.v0 += sy * dv;
-                    r.u1 = r.u0 + w * du;
-                    r.v1 = r.v0 + h * dv;
-                    batch.rect_uv(dx, dy, w, h, r, u32::MAX);
-                }
-            };
-            let grey = rgba(64, 64, 64, 255);
-            match self
-                .container
-                .and_then(|k| self.world.block_entities.get(&k))
-            {
-                Some(_) if self.draw_native_screen(batch, ox, oy) => {}
-                Some(BlockEntity::Chest(_)) if self.draw_machine_screen(batch, ox, oy) => {}
-                Some(BlockEntity::Chest(_)) => self.draw_chest_screen(batch, ox, oy),
-                Some(BlockEntity::Furnace(f)) => {
-                    let (tex, key, fallback) = match f.kind {
-                        horizon_client::containers::FurnaceKind::Furnace => {
-                            ("gui/container/furnace", "container.furnace", "Furnace")
-                        }
-                        horizon_client::containers::FurnaceKind::BlastFurnace => (
-                            "gui/container/blast_furnace",
-                            "container.blast_furnace",
-                            "Blast Furnace",
-                        ),
-                        horizon_client::containers::FurnaceKind::Smoker => {
-                            ("gui/container/smoker", "container.smoker", "Smoker")
-                        }
-                    };
-                    part(batch, tex, 0.0, 0.0, 176.0, 166.0, ox, oy);
-                    // A server's furnace menu has the title it was given.
-                    let title = self.remote_menu_title().unwrap_or_else(|| {
-                        horizon_client::text::Text::literal(
-                            self.container_title(self.translate_with_fallback(key, fallback)),
-                        )
-                        .resolve_legacy()
-                    });
-                    screen_info::name_container(|| title.plain());
-                    let tw = atlas.font.width_text(&title);
-                    batch.text_styled(
-                        atlas,
-                        &title,
-                        ox + (176.0 - tw) / 2.0,
-                        oy + 6.0,
-                        grey,
-                        false,
-                    );
-                    let inventory =
-                        self.translate_with_fallback("container.inventory", "Inventory");
-                    batch.text(atlas, &inventory, ox + 8.0, oy + 72.0, grey, false);
-                    if f.lit_remaining > 0 {
-                        // AbstractFurnaceScreen: flame height ceil(lit * 13) + 1.
-                        let total = if f.lit_total == 0 { 200 } else { f.lit_total };
-                        let h = ((f.lit_remaining as f32 / total as f32) * 13.0).ceil() + 1.0;
-                        part(
-                            batch,
-                            "gui/sprites/container/furnace/lit_progress",
-                            0.0,
-                            14.0 - h,
-                            14.0,
-                            h,
-                            ox + 56.0,
-                            oy + 36.0 + 14.0 - h,
-                        );
-                    }
-                    if f.cooking_timer > 0 && f.cooking_total > 0 {
-                        let w = ((f.cooking_timer as f32 / f.cooking_total as f32) * 24.0).ceil();
-                        part(
-                            batch,
-                            "gui/sprites/container/furnace/burn_progress",
-                            0.0,
-                            0.0,
-                            w,
-                            16.0,
-                            ox + 79.0,
-                            oy + 34.0,
-                        );
-                    }
-                }
-                Some(BlockEntity::Brewing(_)) => {}
-                Some(BlockEntity::Crafter(_)) => self.draw_crafter_screen(batch, ox, oy),
-                Some(
-                    BlockEntity::Sign(_)
-                    | BlockEntity::Jukebox(_)
-                    | BlockEntity::Beacon(_)
-                    | BlockEntity::Lectern(_)
-                    | BlockEntity::Sculk(_)
-                    | BlockEntity::Banner(_)
-                    | BlockEntity::CopperGolemStatue(_)
-                    | BlockEntity::CreakingHeart(_)
-                    | BlockEntity::Spawner(_)
-                    | BlockEntity::TrialSpawner(_)
-                    | BlockEntity::Vault(_)
-                    | BlockEntity::Beehive(_)
-                    | BlockEntity::CommandBlock(_)
-                    | BlockEntity::EndGateway(_)
-                    | BlockEntity::Skull(_)
-                    | BlockEntity::DaylightDetector
-                    | BlockEntity::Bell
-                    | BlockEntity::Conduit(_)
-                    | BlockEntity::EndPortal
-                    | BlockEntity::EnchantingTable
-                    | BlockEntity::Campfire(_)
-                    | BlockEntity::ChiseledBookshelf(_)
-                    | BlockEntity::Brushable(_)
-                    | BlockEntity::Shelf(_)
-                    | BlockEntity::Mod(_)
-                    | BlockEntity::PotentSulfur(_)
-                    | BlockEntity::StructureBlock(_)
-                    | BlockEntity::JigsawBlock(_)
-                    | BlockEntity::TestBlock(_)
-                    | BlockEntity::TestInstanceBlock(_),
-                ) => {}
-                None if self.mount_active() => self.draw_mount_background(batch, ox, oy),
-                None => {
-                    let texture = if self.craft_size == 3 {
-                        "gui/container/crafting_table"
-                    } else {
-                        "gui/container/inventory"
-                    };
-                    part(batch, texture, 0.0, 0.0, 176.0, 166.0, ox, oy);
-                    let title = self.translate_with_fallback("container.crafting", "Crafting");
-                    screen_info::name_container(|| title.clone());
-                    let tx = if self.craft_size == 3 { 29.0 } else { 97.0 };
-                    batch.text(atlas, &title, ox + tx, oy + 6.0, grey, false);
-                    if self.craft_size == 3 {
-                        let inventory =
-                            self.translate_with_fallback("container.inventory", "Inventory");
-                        batch.text(atlas, &inventory, ox + 8.0, oy + 72.0, grey, false);
-                    }
-                }
-            }
-        }
-        if self.container.is_none() && self.craft_size != 3 && !self.mount_active() {
-            self.draw_inventory_player(batch, ox, oy);
-        }
-        self.draw_hovered_slot_highlight(batch, false, ox, oy);
-        self.draw_inventory_slots(batch, ox, oy);
-        self.draw_hovered_slot_highlight(batch, true, ox, oy);
-        self.draw_sort_buttons(batch, ox, oy);
-        self.draw_recipe_book(batch);
-        let effect_tip = if self.container.is_none() && self.craft_size == 2 && !self.mount_active()
-        {
-            self.draw_inventory_effects(batch, (ox, oy), 176)
-        } else {
-            None
-        };
-        self.draw_carried(batch);
-        self.draw_slot_tooltip(batch);
-        self.draw_native_screen_tooltip(batch);
-        if let Some(lines) = effect_tip {
-            self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
-        }
-    }
     pub(super) fn close_container(&mut self) {
         // `Gui.setScreen` clears the old screen's focus before it goes: the
         // key that closed the container (Tab bound to the inventory) has
@@ -7847,33 +7700,31 @@ impl Game<'_> {
         self.occupy_bed(head);
         true
     }
-    fn wake_up(&mut self) {
+    /// `Player.stopSleepInBed`: preserve the flags of the owning wake caller.
+    fn wake_up(&mut self, wake_immediately: bool, update_level: bool) {
         if self.remote.is_some() {
             // InBedChatScreen.sendWakeUp: the server wakes the player.
             self.remote_stop_sleeping();
             return;
         }
+        // PlayerWakeUpEvent: heard at the start of stopSleepInBed, still in bed;
+        // a listener may have woken the player, so the sleep is read after it.
+        self.native_acting_bed_leave(wake_immediately, update_level);
         let Some(head) = self.sleeping.take() else {
             return;
         };
-        self.sleep_timer = 100;
+        self.sleep_timer = if wake_immediately { 0 } else { 100 };
         // The active guest's live body wakes here; the hub owns its wake
         // animation and sleeping metadata, not the suspended outer actor.
         if let Some(i) = self.lan_acting.and_then(|conn| self.guest_index(conn))
             && let Some(host) = self.lan.as_mut()
         {
             // The live turn may have changed its bed since entry.
-            {
-                let value = Some(head);
-                host.hub.guests.update(i, |guest| guest.bed = value);
-            }
-            host.hub.wake(i);
+            host.hub.guests.update(i, |guest| guest.bed = Some(head));
+            host.hub.wake(i, wake_immediately);
             // This live body applies the stand-up pose below, not the later
             // wake_woken_guests pass over stored guest bodies.
-            {
-                let value = None;
-                host.hub.guests.update(i, |guest| guest.woke_from = value);
-            }
+            host.hub.guests.update(i, |guest| guest.woke_from = None);
         }
         let stand = self.bed_wake_pose(head, self.yaw);
         if let Some(p) = self.player.as_mut() {
@@ -7895,9 +7746,6 @@ impl Game<'_> {
                 self.snap_player_model_pitch();
             }
         }
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
-            self.native_player_bed_leave(player, &name, head);
-        }
     }
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
@@ -7908,14 +7756,13 @@ impl Game<'_> {
             let bed_gone = !self.res.facts().get(bed).name.ends_with("_bed");
             // Vanilla has no Shift wake-up: the chat screen's capitals must
             // not get the sleeper up.
-            if (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak))
-                || bed_gone
+            let wake_immediately = bed_gone
                 || self
                     .player
                     .as_ref()
-                    .is_none_or(|p| p.health.dead_or_dying())
-            {
-                self.wake_up();
+                    .is_none_or(|p| p.health.dead_or_dying());
+            if wake_immediately || (self.screen != Screen::Chat && self.keys.held(Mapping::Sneak)) {
+                self.wake_up(wake_immediately, true);
                 return;
             }
             // setPosToBed: the bed's top (`getSleepHeight`) and 0.125 above
@@ -7971,7 +7818,7 @@ impl Game<'_> {
                 self.world.weather.thunder_time = 0;
             }
             if self.sleeping.is_some() {
-                self.wake_up();
+                self.wake_up(false, false);
             }
             self.wake_guests();
             // SleepStatus.removeAllSleepers: waking everyone is not announced.

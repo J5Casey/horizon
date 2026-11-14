@@ -407,7 +407,7 @@ impl Game<'_> {
         let data = self.options.resources.join("data");
         // The world's packs' advancements go over the game's own, and a
         // native mod's contributed files are already among them: the tables
-        // were built for this open (`build_world_tables`), so the hook is
+        // were built for this open (`stage_world_tables`), so the hook is
         // asked once, not again here.
         let files = match &self.world_tables {
             Some(tables) => tables.files.clone(),
@@ -3368,9 +3368,7 @@ mod structure_tag_tests {
             &[],
             &[],
         );
-        let (tables, _) = game
-            .build_world_tables(&stack, false, &root, false)
-            .unwrap();
+        let (tables, _, _) = game.stage_world_tables(&stack, false, &root).unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));

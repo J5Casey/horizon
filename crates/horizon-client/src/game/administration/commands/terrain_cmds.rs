@@ -1609,12 +1609,7 @@ mod loot_mine_location_tests {
             .unwrap();
             let stack = game.reload_datapacks(false, &[]).unwrap();
             game.world_tables = game
-                .build_world_tables(
-                    &stack,
-                    false,
-                    &game.options.resources.clone(),
-                    game.mods.data_switched,
-                )
+                .stage_world_tables(&stack, false, &game.options.resources.clone())
                 .unwrap()
                 .0;
             assert!(game.world_tables.is_some());

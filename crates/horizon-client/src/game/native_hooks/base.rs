@@ -1955,16 +1955,6 @@ impl Game<'_> {
     ) {
         self.fire_player_bed_enter(player, name, pos, cancel);
     }
-    /// A server player woke or stood up from the bed at `pos`, after their
-    /// sleeping state changed.
-    pub(in crate::game) fn native_player_bed_leave(
-        &mut self,
-        player: u128,
-        name: &str,
-        pos: [i32; 3],
-    ) {
-        self.fire_player_bed_leave(player, name, pos);
-    }
     /// A server player's book edit or signing packet is about to be applied. `pages` is its page
     /// count; `signing` means the packet has a title. Set `cancel` to drop the edit.
     pub(in crate::game) fn native_player_edit_book(

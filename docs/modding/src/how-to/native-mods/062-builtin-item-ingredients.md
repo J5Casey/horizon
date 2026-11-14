@@ -55,7 +55,7 @@ Native registrations retain their persistent NBT validation contract.
 The shared decoder currently covers `damage`, `repair_cost`, `max_damage`,
 `max_stack_size`, `rarity`, `enchantments`, `stored_enchantments`, `custom_name`,
 `enchantment_glint_override`, `item_name`, `item_model`, `dyed_color`, `block_entity_data`, `enchantable`, `map_id`,
-`ominous_bottle_amplifier`, `potion_duration_scale`, and `minimum_attack_charge` in the `minecraft` namespace.
+`ominous_bottle_amplifier`, `potion_duration_scale`, `minimum_attack_charge`, and `dye` in the `minecraft` namespace.
 `enchantable` requires a positive integer `value`; extra record fields are ignored
 and equivalent numeric NBT widths match, including item defaults. Map ids accept
 signed numbers, including negative ids, using Java's integer conversion.
@@ -77,8 +77,13 @@ zero (including negative zero) is false; nonzero values, fractions and NaN are
 true. Displays retain canonical byte 0 or 1.
 `dyed_color` accepts packed integer colors or three numeric RGB channels,
 matching the decoded values without copying candidate payloads.
-The other 104 registered built-ins use stored-value matching while their shared
+The other 103 registered built-ins use stored-value matching while their shared
 decoders are added incrementally in **#3875**. Their absence is not a load refusal.
+
+`dye` accepts exactly the 16 lowercase vanilla color names (including `light_blue`
+and `light_gray`). Unknown names, differently cased names and non-string values
+reject the recipe. Numeric dye ordinals belong to compressed dynamic operations,
+not ordinary persistent NBT; compressing an NBT file does not change this rule.
 
 Component ingredient displays contain the patch, including removals. Difference
 lists retain the base list and remove only items whose default stack passes the

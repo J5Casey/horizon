@@ -2149,7 +2149,7 @@ mod empty_ingredient_placement_tests {
                 &[],
             );
             game.world_tables = game
-                .build_world_tables(&stack, false, &resources, false)
+                .stage_world_tables(&stack, false, &resources)
                 .unwrap()
                 .0;
             game.build_registries();

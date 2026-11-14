@@ -271,6 +271,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     #[test]
+    #[ignore = "daily"]
     fn a_request_with_a_line_break_is_refused_unsent() {
         let dir = std::env::temp_dir().join(format!("horizon-control-line-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

@@ -120,6 +120,15 @@ pub fn component_equal(id: &str, a: &ItemStack, b: &ItemStack) -> bool {
         ),
         "minecraft:rarity" => rarity(a) == rarity(b),
         "minecraft:ominous_bottle_amplifier" => ominous_amplifier(a) == ominous_amplifier(b),
+        // DyeColor.CODEC's canonical NbtOps value is its exact serialized name.
+        // Live stacks retain dye in `other`; borrow UTF-16 without palette scans.
+        "minecraft:dye" => match (
+            a.data().and_then(|d| d.other(id)),
+            b.data().and_then(|d| d.other(id)),
+        ) {
+            (Some(Tag::String(a)), Some(Tag::String(b))) => a == b,
+            _ => false,
+        },
         _ => stored_component_equal(id, a, b),
     }
 }
